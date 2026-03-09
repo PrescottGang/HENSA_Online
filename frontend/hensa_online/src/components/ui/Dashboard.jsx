@@ -4,6 +4,8 @@ import DashboardSidebar from "./DashboardSidebar";
 import DashboardHeader from "./DashboardHeader";
 import Announcement from "../dashbord/Announcement";
 import Users from "../dashbord/Users";
+import AnneeAcademique from "../dashbord/AnneeAcademique";
+import Filieres from "../dashbord/Filieres";
 
 const Placeholder = ({ label }) => (
   <div className="flex items-center justify-center h-64 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-lg font-medium bg-white">
@@ -24,6 +26,7 @@ const pageLabels = {
   documents: "Documents",
   annonces: "Annonces officielles",
   publications: "Publications",
+  "annee-academique": "Année académique",
 };
 
 function renderPage(role, activePage) {
@@ -57,13 +60,14 @@ function renderPage(role, activePage) {
       case "dashboard":       return <Placeholder label="Dashboard Admin" />;
       case "publications":    return <Placeholder label="Publications" />;
       case "utilisateurs":    return <Users/>;
-      case "filieres":        return <Placeholder label="Filières" />;
+      case "filieres":        return <Filieres/>;
       case "cours":           return <Placeholder label="Cours" />;
       case "statistiques":    return <Placeholder label="Statistiques" />;
       case "documents":       return <Placeholder label="Documents" />;
       case "annonces":        return <Announcement />;
       case "messagerie":      return <Placeholder label="Messagerie" />;
       case "notifications":   return <Placeholder label="Notifications" />;
+      case "annee-academique":   return <AnneeAcademique />;
       default:                return <Placeholder label="Dashboard Admin" />;
     }
   }

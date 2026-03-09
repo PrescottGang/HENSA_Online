@@ -46,7 +46,7 @@ const navByRole = {
     { id: "utilisateurs", label: "Utilisateurs", icon: Users },
     { id: "filieres", label: "Filières", icon: Building },
     { id: "annonces", label: "Annonces", icon: Megaphone },
-    { id: "année-academique", label: "Année Académique", icon: Calendar },
+    { id: "annee-academique", label: "Année Académique", icon: Calendar },
   ],
 };
 

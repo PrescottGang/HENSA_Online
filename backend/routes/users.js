@@ -47,33 +47,19 @@ router.get("/classes", async (req, res) => {
     const [tables] = await db.query("SHOW TABLES LIKE 'semestre'");
     const semestreExists = tables.length > 0;
     
-    let query;
-    if (semestreExists) {
-      query = `
-        SELECT 
-          c.id, 
-          c.nom, 
-          c.code, 
-          c.semestre_id,
-          s.nom AS semestre_nom,
-          NULL AS annee_universitaire
-        FROM classe c
-        LEFT JOIN semestre s ON c.semestre_id = s.id
-        ORDER BY c.nom ASC
-      `;
-    } else {
-      query = `
-        SELECT 
-          id, 
-          nom, 
-          code, 
-          semestre_id,
-          NULL AS semestre_nom,
-          NULL AS annee_universitaire
-        FROM classe 
-        ORDER BY nom ASC
-      `;
-    }
+    // classe est identifiee par filiere + niveau (pas de nom propre)
+    const query = `
+      SELECT 
+        c.id,
+        f.nom  AS filiere_nom,
+        n.nom  AS niveau_nom,
+        n.cycle,
+        n.ordre
+      FROM classe c
+      INNER JOIN filiere f ON c.filiere_id = f.id
+      INNER JOIN niveau  n ON c.niveau_id  = n.id
+      ORDER BY f.nom ASC, n.ordre ASC
+    `;
     
     const [rows] = await db.query(query);
     console.log(`📚 ${rows.length} classes chargées`);
@@ -130,12 +116,14 @@ router.get("/etudiants", async (req, res) => {
         u.statut,
         e.matricule,
         e.classe_id,
-        c.id AS classe_id,
-        c.nom AS classe_nom,
-        c.code AS classe_code
+        f.nom  AS filiere_nom,
+        n.nom  AS niveau_nom,
+        n.cycle
       FROM etudiant e
-      INNER JOIN utilisateur u ON e.id = u.id
-      LEFT JOIN classe c ON e.classe_id = c.id
+      INNER JOIN utilisateur u ON e.id   = u.id
+      INNER JOIN classe      c ON e.classe_id = c.id
+      INNER JOIN filiere     f ON c.filiere_id = f.id
+      INNER JOIN niveau      n ON c.niveau_id  = n.id
       WHERE u.role = 'ETUDIANT'
       ORDER BY u.nom ASC, u.prenom ASC
     `);
@@ -210,105 +198,93 @@ router.get("/:id", async (req, res) => {
 });
 
 // =============================
-// POST ETUDIANT
+// POST ETUDIANT + INSCRIPTION
 // =============================
 router.post("/etudiants", async (req, res) => {
-  const {
-    nom,
-    prenom,
-    email,
-    mot_de_passe,
-    matricule,
-    classe_id,
-    niveau,
-  } = req.body;
+  const { nom, prenom, email, mot_de_passe, matricule, classe_id } = req.body;
 
-  // Validations
-  const errors = [];
-  if (!nom) errors.push("Le nom est requis");
-  if (!prenom) errors.push("Le prénom est requis");
-  if (!email) errors.push("L'email est requis");
-  if (!validateEmail(email)) errors.push("Format d'email invalide");
-  if (!mot_de_passe) errors.push("Le mot de passe est requis");
-  if (!validatePassword(mot_de_passe)) errors.push("Le mot de passe doit contenir au moins 6 caractères");
-  if (!matricule) errors.push("Le matricule est requis");
-  if (!classe_id) errors.push("La classe est requise");
-  if (!niveau) errors.push("Le niveau est requis");
-
-  if (errors.length > 0) {
-    return res.status(400).json({ error: errors.join(", ") });
+  if (!nom || !prenom || !email || !mot_de_passe || !matricule || !classe_id) {
+    return res.status(400).json({ error: "Tous les champs sont requis" });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Format d'email invalide" });
+  }
+  if (mot_de_passe.length < 6) {
+    return res.status(400).json({ error: "Mot de passe : min. 6 caracteres" });
   }
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
 
   try {
-    // Vérifier email unique
-    const [existing] = await conn.query(
-      "SELECT id FROM utilisateur WHERE email = ?",
-      [email]
+    // 1️⃣ Récupérer l'année académique active
+    const [annee] = await conn.query(
+      "SELECT id, libelle FROM annee_academique WHERE statut='ACTIVE' LIMIT 1"
     );
+    if (!annee.length) throw new Error("Aucune année académique active trouvée");
 
-    if (existing.length > 0) {
-      throw new Error("Email déjà utilisé");
-    }
+    const anneeId = annee[0].id;
+    const yearPart = annee[0].libelle.split("-")[0]; // Récupère "2024" de "2024-2025"
 
-    // Vérifier matricule unique
-    const [existingMatricule] = await conn.query(
-      "SELECT id FROM etudiant WHERE matricule = ?",
-      [matricule]
+    // 2️⃣ Récupérer le code de la filière via la classe
+    const [classeInfo] = await conn.query(`
+      SELECT f.nom AS code 
+      FROM classe c 
+      JOIN filiere f ON c.filiere_id = f.id 
+      WHERE c.id = ?`, 
+      [classe_id]
     );
+    if (!classeInfo.length) throw new Error("Classe invalide");
+    const filiereCode = classeInfo[0].code;
 
-    if (existingMatricule.length > 0) {
-      throw new Error("Matricule déjà utilisé");
-    }
+    // 3️⃣ Générer le matricule (Compte total d'inscriptions pour l'année)
+    const [countResult] = await conn.query(
+      "SELECT COUNT(*) as total FROM inscription WHERE annee_id = ?",
+      [anneeId]
+    );
+    const numero = String(countResult[0].total + 1).padStart(4, "0");
+    const matricule = `${yearPart}-${filiereCode}-${numero}`;
 
+    // 4️⃣ Creer l'utilisateur (role ETUDIANT) avec mot de passe hache
     const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
-
-    // Insert utilisateur
     const [userResult] = await conn.query(
-      `INSERT INTO utilisateur 
-      (nom, prenom, email, mot_de_passe, role, statut)
-      VALUES (?, ?, ?, ?, 'ETUDIANT', 'ACTIF')`,
+      "INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, role, statut) VALUES (?, ?, ?, ?, 'ETUDIANT', 'ACTIF')",
       [nom, prenom, email, hashedPassword]
     );
-
     const userId = userResult.insertId;
 
-    // Insert etudiant
+    // 5️⃣ Creer l'entree dans la table etudiant (matricule fourni par l'admin)
+    // Verifier unicite du matricule
+    const [existingMat] = await conn.query(
+      "SELECT id FROM etudiant WHERE matricule = ?", [matricule.toUpperCase()]
+    );
+    if (existingMat.length > 0) throw new Error("Ce matricule est deja utilise");
+
     await conn.query(
-      `INSERT INTO etudiant (id, matricule, classe_id, niveau)
-       VALUES (?, ?, ?, ?)`,
-      [userId, matricule, classe_id, niveau]
+      "INSERT INTO etudiant (id, matricule, classe_id) VALUES (?, ?, ?)",
+      [userId, matricule.toUpperCase(), classe_id]
+    );
+
+    // 6️⃣ Créer l'inscription officielle
+    await conn.query(
+      "INSERT INTO inscription (etudiant_id, classe_id, annee_id, statut) VALUES (?, ?, ?, 'INSCRIT')",
+      [userId, classe_id, anneeId]
     );
 
     await conn.commit();
-    
-    // Récupérer l'étudiant créé
-    const [newStudent] = await conn.query(`
-      SELECT 
-        u.id, u.nom, u.prenom, u.email, u.statut,
-        e.matricule, e.niveau, c.nom AS classe_nom
-      FROM utilisateur u
-      JOIN etudiant e ON u.id = e.id
-      LEFT JOIN classe c ON e.classe_id = c.id
-      WHERE u.id = ?
-    `, [userId]);
-
     res.status(201).json({ 
-      message: "Étudiant ajouté avec succès",
-      student: newStudent[0]
+      message: "Étudiant enregistré et inscrit avec succès", 
+      matricule 
     });
 
   } catch (err) {
     await conn.rollback();
-    console.error("Erreur POST /etudiants:", err);
-    res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   } finally {
     conn.release();
   }
 });
-
 // =============================
 // POST ENSEIGNANT
 // =============================
