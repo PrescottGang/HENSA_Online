@@ -28,6 +28,7 @@ const navByRole = {
     { id: "cours", label: "Mes cours", icon: BookOpen },
     { id: "messagerie", label: "Messagerie", icon: Mail },
     { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "annonces", label: "Annonces", icon: Megaphone },
   ],
   ENSEIGNANT: [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
@@ -36,6 +37,7 @@ const navByRole = {
     { id: "emploi-du-temps", label: "Emploi du temps", icon: Calendar },
     { id: "messagerie", label: "Messagerie", icon: Mail },
     { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "annonces", label: "Annonces", icon: Megaphone },
   ],
   ADMIN: [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },

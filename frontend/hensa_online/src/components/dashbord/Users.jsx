@@ -3,7 +3,7 @@ import axios from "axios";
 import {
   Search, UserPlus, X, Trash2, ToggleLeft, ToggleRight,
   AlertCircle, CheckCircle, Loader, Users, GraduationCap,
-  BookOpen, RefreshCw
+  BookOpen, RefreshCw, Mail
 } from "lucide-react";
 
 const API = "http://localhost:5000/api";
@@ -14,8 +14,9 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// ✅ Plus de champ "password" dans le formulaire
 const emptyForm = {
-  nom: "", prenom: "", email: "", password: "",
+  nom: "", prenom: "", email: "",
   matricule: "", classe_id: "", specialite: "", grade: "",
 };
 
@@ -38,7 +39,7 @@ const UsersManagement = () => {
 
   const showNotification = (message, type = "success") => {
     setNotification({ show: true, message, type });
-    setTimeout(() => setNotification({ show: false, message: "", type: "" }), 3000);
+    setTimeout(() => setNotification({ show: false, message: "", type: "" }), 4000);
   };
 
   const fetchStudents = async () => {
@@ -46,7 +47,7 @@ const UsersManagement = () => {
     try {
       const res = await apiClient.get("/users/etudiants");
       setStudents(res.data);
-    } catch (err) {
+    } catch {
       showNotification("Erreur lors du chargement des etudiants", "error");
     } finally {
       setLoadingData(prev => ({ ...prev, students: false }));
@@ -58,7 +59,7 @@ const UsersManagement = () => {
     try {
       const res = await apiClient.get("/users/enseignants");
       setTeachers(res.data);
-    } catch (err) {
+    } catch {
       showNotification("Erreur lors du chargement des enseignants", "error");
     } finally {
       setLoadingData(prev => ({ ...prev, teachers: false }));
@@ -72,7 +73,7 @@ const UsersManagement = () => {
       setClasses(res.data);
       if (res.data.length === 0)
         showNotification("Aucune classe trouvee dans la base de donnees", "warning");
-    } catch (err) {
+    } catch {
       showNotification("Erreur lors du chargement des classes", "error");
     } finally {
       setLoadingData(prev => ({ ...prev, classes: false }));
@@ -83,29 +84,52 @@ const UsersManagement = () => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    if (!form.email.includes("@")) { setError("Format d'email invalide"); setLoading(false); return; }
-    if (form.password.length < 6)  { setError("Mot de passe : min. 6 caracteres"); setLoading(false); return; }
+
+    if (!form.email.includes("@")) {
+      setError("Format d'email invalide");
+      setLoading(false);
+      return;
+    }
+
     try {
       if (formType === "student") {
-        if (!form.matricule || !form.classe_id) { setError("Matricule et classe obligatoires"); setLoading(false); return; }
+        if (!form.classe_id) {
+          setError("La classe est obligatoire");
+          setLoading(false);
+          return;
+        }
+        // ✅ Plus de mot_de_passe envoyé — généré côté serveur
         const res = await apiClient.post("/users/etudiants", {
-          nom: form.nom.trim(), prenom: form.prenom.trim(),
-          email: form.email.trim().toLowerCase(), mot_de_passe: form.password,
-          matricule: form.matricule.trim().toUpperCase(), classe_id: form.classe_id,
+          nom: form.nom.trim(),
+          prenom: form.prenom.trim(),
+          email: form.email.trim().toLowerCase(),
+          classe_id: form.classe_id,
         });
         await fetchStudents();
-        showNotification(res.data.message || "Etudiant ajoute avec succes");
+        const emailMsg = res.data.emailSent
+          ? "Etudiant ajouté · Identifiants envoyés par email ✉️"
+          : "Etudiant ajouté (⚠️ email non envoyé)";
+        showNotification(emailMsg, res.data.emailSent ? "success" : "warning");
+
       } else {
+        // ✅ Plus de mot_de_passe envoyé
         const res = await apiClient.post("/users/enseignants", {
-          nom: form.nom.trim(), prenom: form.prenom.trim(),
-          email: form.email.trim().toLowerCase(), mot_de_passe: form.password,
-          specialite: form.specialite.trim() || null, grade: form.grade.trim() || null,
+          nom: form.nom.trim(),
+          prenom: form.prenom.trim(),
+          email: form.email.trim().toLowerCase(),
+          specialite: form.specialite.trim() || null,
+          grade: form.grade.trim() || null,
         });
         await fetchTeachers();
-        showNotification(res.data.message || "Enseignant ajoute avec succes");
+        const emailMsg = res.data.emailSent
+          ? "Enseignant ajouté · Identifiants envoyés par email ✉️"
+          : "Enseignant ajouté (⚠️ email non envoyé)";
+        showNotification(emailMsg, res.data.emailSent ? "success" : "warning");
       }
+
       setOpen(false);
       setForm(emptyForm);
+
     } catch (err) {
       const msg = err.response?.data?.error || "Une erreur est survenue.";
       setError(msg);
@@ -122,7 +146,9 @@ const UsersManagement = () => {
       await apiClient.patch(`/users/${route}/${id}/statut`, { statut: newStatut });
       type === "student" ? await fetchStudents() : await fetchTeachers();
       showNotification("Statut modifie avec succes");
-    } catch { showNotification("Erreur modification statut", "error"); }
+    } catch {
+      showNotification("Erreur modification statut", "error");
+    }
   };
 
   const handleDelete = async (id, type) => {
@@ -132,7 +158,9 @@ const UsersManagement = () => {
       await apiClient.delete(`/users/${route}/${id}`);
       type === "student" ? await fetchStudents() : await fetchTeachers();
       showNotification("Utilisateur supprime avec succes");
-    } catch { showNotification("Erreur lors de la suppression", "error"); }
+    } catch {
+      showNotification("Erreur lors de la suppression", "error");
+    }
   };
 
   const initials = (prenom, nom) => `${prenom?.[0] || ""}${nom?.[0] || ""}`.toUpperCase() || "?";
@@ -154,6 +182,8 @@ const UsersManagement = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
+
+        {/* Notification */}
         {notification.show && (
           <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
             notification.type === "success" ? "bg-green-50 text-green-800 border border-green-200" :
@@ -165,6 +195,7 @@ const UsersManagement = () => {
           </div>
         )}
 
+        {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
             <div className="flex items-center gap-3">
@@ -192,6 +223,7 @@ const UsersManagement = () => {
           </div>
         </div>
 
+        {/* Tableau */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="flex gap-1 border-b border-gray-200 px-4">
             {[
@@ -211,6 +243,7 @@ const UsersManagement = () => {
             ))}
           </div>
 
+          {/* Tab Etudiants */}
           {activeTab === "students" && (
             <div className="overflow-x-auto">
               {loadingData.students ? (
@@ -268,6 +301,7 @@ const UsersManagement = () => {
             </div>
           )}
 
+          {/* Tab Enseignants */}
           {activeTab === "teachers" && (
             <div className="overflow-x-auto">
               {loadingData.teachers ? (
@@ -320,9 +354,11 @@ const UsersManagement = () => {
         </div>
       </div>
 
+      {/* Modal d'ajout */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-800">
                 Ajouter un {formType === "student" ? "etudiant" : "enseignant"}
@@ -332,7 +368,10 @@ const UsersManagement = () => {
                 <X className="h-5 w-5" />
               </button>
             </div>
+
             <div className="p-6">
+
+              {/* Sélecteur type */}
               <div className="flex gap-2 mb-4">
                 {["student","teacher"].map((type) => (
                   <button key={type} type="button" onClick={() => { setFormType(type); setError(""); setForm(emptyForm); }}
@@ -341,35 +380,40 @@ const UsersManagement = () => {
                   </button>
                 ))}
               </div>
+
+              {/* ✅ Bandeau info mot de passe automatique */}
+              <div className="mb-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm flex items-center gap-2">
+                <Mail className="h-4 w-4 flex-shrink-0" />
+                Un mot de passe temporaire sera généré et envoyé par email automatiquement.
+              </div>
+
               {error && (
                 <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />{error}
                 </div>
               )}
+
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <input placeholder="Prenom *" value={form.prenom} required onChange={(e) => setForm({ ...form, prenom: e.target.value })} className={inputClass} />
                   <input placeholder="Nom *" value={form.nom} required onChange={(e) => setForm({ ...form, nom: e.target.value })} className={inputClass} />
                 </div>
                 <input type="email" placeholder="Email institutionnel *" value={form.email} required onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputClass} />
-                <input type="password" placeholder="Mot de passe (min. 6 caracteres) *" value={form.password} required minLength="6" onChange={(e) => setForm({ ...form, password: e.target.value })} className={inputClass} />
+
+                {/* ✅ Champ mot de passe supprimé */}
 
                 {formType === "student" ? (
-                  <>
-                    <input placeholder="Matricule (ex: 2024-INFO-0001) *" value={form.matricule} required
-                      onChange={(e) => setForm({ ...form, matricule: e.target.value.toUpperCase() })} className={inputClass} />
-                    <div>
-                      <select value={form.classe_id} required onChange={(e) => setForm({ ...form, classe_id: e.target.value })} className={`${inputClass} bg-white`}>
-                        <option value="">-- Selectionner une classe (filiere + niveau) * --</option>
-                        {loadingData.classes ? <option disabled>Chargement...</option>
-                          : classes.length === 0 ? <option disabled>Aucune classe disponible</option>
-                          : classes.map((c) => <option key={c.id} value={c.id}>{classeLabel(c)}</option>)}
-                      </select>
-                      {classes.length === 0 && !loadingData.classes && (
-                        <p className="text-xs text-amber-600 mt-1">Aucune classe trouvee. Creez d'abord des classes.</p>
-                      )}
-                    </div>
-                  </>
+                  <div>
+                    <select value={form.classe_id} required onChange={(e) => setForm({ ...form, classe_id: e.target.value })} className={`${inputClass} bg-white`}>
+                      <option value="">-- Selectionner une classe * --</option>
+                      {loadingData.classes ? <option disabled>Chargement...</option>
+                        : classes.length === 0 ? <option disabled>Aucune classe disponible</option>
+                        : classes.map((c) => <option key={c.id} value={c.id}>{classeLabel(c)}</option>)}
+                    </select>
+                    {classes.length === 0 && !loadingData.classes && (
+                      <p className="text-xs text-amber-600 mt-1">Aucune classe trouvee. Creez d'abord des classes.</p>
+                    )}
+                  </div>
                 ) : (
                   <>
                     <input placeholder="Specialite (ex: Informatique)" value={form.specialite} onChange={(e) => setForm({ ...form, specialite: e.target.value })} className={inputClass} />
@@ -379,9 +423,14 @@ const UsersManagement = () => {
 
                 <button type="submit" disabled={loading || (formType === "student" && classes.length === 0)}
                   className="w-full mt-2 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                  {loading ? <><Loader className="h-4 w-4 animate-spin" /> Enregistrement...</> : "Enregistrer"}
+                  {loading ? (
+                    <><Loader className="h-4 w-4 animate-spin" /> Enregistrement...</>
+                  ) : (
+                    <><Mail className="h-4 w-4" /> Enregistrer et envoyer les identifiants</>
+                  )}
                 </button>
               </form>
+
             </div>
           </div>
         </div>

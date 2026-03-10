@@ -22,6 +22,8 @@ export default function ResetPassword(){
     const data = await res.json();
 
     setMessage(data.message);
+
+    redirect("/login");
   };
 
   return(

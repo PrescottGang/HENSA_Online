@@ -20,6 +20,8 @@ export default function ForgotPassword(){
     const data = await res.json();
 
     setMessage(data.message);
+
+    redirect("/reset-password");
   };
 
   return(

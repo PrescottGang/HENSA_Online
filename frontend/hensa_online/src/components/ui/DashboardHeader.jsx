@@ -1,6 +1,7 @@
 import React from "react";
 import { useAuth } from "../../lib/auth-context";
 import { Bell, Menu, Search } from "lucide-react";
+import NotificationBell from "./NotificationBell";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -43,12 +44,8 @@ export default function DashboardHeader({ title, onMenuToggle }) {
         </div>
 
         {/* Notifications */}
-        <button className="relative h-10 w-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
-          <Bell className="h-5 w-5 text-gray-600" />
-          <span className="absolute top-2 right-2 h-4 w-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold border-2 border-white">
-            3
-          </span>
-        </button>
+          <NotificationBell/>
+      
       </div>
     </header>
   );

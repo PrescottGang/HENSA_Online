@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useAuth } from "../../lib/auth-context";
 import DashboardSidebar from "./DashboardSidebar";
 import DashboardHeader from "./DashboardHeader";
-import Announcement from "../dashbord/Announcement";
 import Users from "../dashbord/Users";
 import AnneeAcademique from "../dashbord/AnneeAcademique";
+import Announcement from "../dashbord/Announcement";
 import Filieres from "../dashbord/Filieres";
+import PublicationsFeed from "../dashbord/PublicationsFeed";
+import Messaging from "../dashbord/Messaging";
 
 const Placeholder = ({ label }) => (
   <div className="flex items-center justify-center h-64 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-lg font-medium bg-white">
@@ -33,12 +35,13 @@ function renderPage(role, activePage) {
   if (role === "ETUDIANT") {
     switch (activePage) {
       case "dashboard":       return <Placeholder label="Dashboard Étudiant" />;
-      case "publications":    return <Placeholder label="Publications" />;
+      case "publications":    return <PublicationsFeed />;
       case "emploi-du-temps": return <Placeholder label="Emploi du temps" />;
       case "notes":           return <Placeholder label="Notes & Résultats" />;
       case "cours":           return <Placeholder label="Mes cours" />;
-      case "messagerie":      return <Placeholder label="Messagerie" />;
+      case "messagerie":      return <Messaging />;
       case "notifications":   return <Placeholder label="Notifications" />;
+      case "annonces":        return <Announcement />;
       default:                return <Placeholder label="Dashboard Étudiant" />;
     }
   }
@@ -49,8 +52,9 @@ function renderPage(role, activePage) {
       case "cours":           return <Placeholder label="Mes cours" />;
       case "notes":           return <Placeholder label="Notes & Évaluations" />;
       case "emploi-du-temps": return <Placeholder label="Emploi du temps" />;
-      case "messagerie":      return <Placeholder label="Messagerie" />;
+      case "messagerie":      return <Messaging />;
       case "notifications":   return <Placeholder label="Notifications" />;
+      case "annonces":        return <Announcement />;
       default:                return <Placeholder label="Dashboard Enseignant" />;
     }
   }
@@ -58,14 +62,14 @@ function renderPage(role, activePage) {
   if (role === "ADMIN") {
     switch (activePage) {
       case "dashboard":       return <Placeholder label="Dashboard Admin" />;
-      case "publications":    return <Placeholder label="Publications" />;
+      case "publications":    return <PublicationsFeed />;
       case "utilisateurs":    return <Users/>;
       case "filieres":        return <Filieres/>;
       case "cours":           return <Placeholder label="Cours" />;
       case "statistiques":    return <Placeholder label="Statistiques" />;
       case "documents":       return <Placeholder label="Documents" />;
       case "annonces":        return <Announcement />;
-      case "messagerie":      return <Placeholder label="Messagerie" />;
+      case "messagerie":      return <Messaging />;
       case "notifications":   return <Placeholder label="Notifications" />;
       case "annee-academique":   return <AnneeAcademique />;
       default:                return <Placeholder label="Dashboard Admin" />;
