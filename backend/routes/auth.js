@@ -1,9 +1,9 @@
-const crypto = require('crypto');      
-const nodemailer = require('nodemailer');
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');         // ✅ Déplacé en haut du fichier
+const nodemailer = require('nodemailer'); // ✅ Déplacé en haut du fichier
 const db = require('../db');
 
 // ✅ Transporter créé une seule fois, en dehors des routes
@@ -65,6 +65,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         role: user.role,
         premiereConnexion: user.premiere_connexion,
+        photo_profil: user.photo || null,
       },
     });
   } catch (err) {

@@ -1,10 +1,11 @@
 // src/components/Messaging.jsx
 import { useState, useEffect, useRef } from "react";
 import {
-  Send, X, Search, Users, Lock, Smile, Paperclip,
+  Send, X, Search, Users, Lock, Paperclip,
   ChevronLeft, Loader, Trash2, CheckCheck, Check,
   UserPlus, FileText, Download, FileSpreadsheet, File
 } from "lucide-react";
+import EmojiPicker from "emoji-picker-react";
 import { useSocket } from "../hooks/useSocket";
 import axios from "axios";
 
@@ -32,8 +33,6 @@ const formatTime = (d) => {
 
 const fullUrl = (url) => !url ? "" : url.startsWith("http") ? url : `${BASE_URL}${url}`;
 
-const ROLE_COLORS = { ETUDIANT: "bg-green-500", ENSEIGNANT: "bg-yellow-500", ADMIN: "bg-blue-500" };
-
 // ─── Icônes fichiers ──────────────────────────────────────────────────────────
 const FILE_META = {
   pdf:  { Icon: FileText,        color: "text-red-500",    bg: "bg-red-50"    },
@@ -44,58 +43,51 @@ const FILE_META = {
   ppt:  { Icon: File,            color: "text-orange-500", bg: "bg-orange-50" },
   pptx: { Icon: File,            color: "text-orange-500", bg: "bg-orange-50" },
 };
-const fileMeta = (nom = "") => FILE_META[nom.split(".").pop()?.toLowerCase()] ?? { Icon: File, color: "text-gray-500", bg: "bg-gray-100" };
+const fileMeta = (nom = "") =>
+  FILE_META[nom.split(".").pop()?.toLowerCase()] ?? { Icon: File, color: "text-gray-500", bg: "bg-gray-100" };
 
-// ─── URLs cliquables dans le texte ────────────────────────────────────────────
+// ─── URLs cliquables ──────────────────────────────────────────────────────────
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
-function isUrl(s) { return s.startsWith("http://") || s.startsWith("https://"); }
+const isUrl = (s) => s.startsWith("http://") || s.startsWith("https://");
 function RichText({ text, isMe }) {
   if (!text) return null;
-  const parts = text.split(URL_PATTERN);
   return (
     <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-      {parts.map((part, i) =>
+      {text.split(URL_PATTERN).map((part, i) =>
         isUrl(part)
           ? <a key={i} href={part} target="_blank" rel="noreferrer"
-               className={"underline underline-offset-2 break-all " + (isMe ? "text-blue-200 hover:text-white" : "text-blue-500 hover:text-blue-700")}>{part}</a>
+               className={"underline underline-offset-2 break-all " + (isMe ? "text-blue-200 hover:text-white" : "text-blue-500 hover:text-blue-700")}>
+              {part}
+            </a>
           : <span key={i}>{part}</span>
       )}
     </p>
   );
 }
 
-// ─── Emoji picker (sans dépendance) ──────────────────────────────────────────
-const EMOJIS = [
-  "😀","😂","😊","😍","🥰","😎","😭","😅","🤔","😬",
-  "👍","👎","❤️","🔥","✅","🎉","🙏","💪","😴","🤣",
-  "😮","😤","🥳","🤩","😇","🤗","😑","🙄","😏","🥲",
-  "💯","⭐","✨","🚀","📚","📝","💡","🎯","⚡","🌟",
-];
-function EmojiPicker({ onPick, onClose }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [onClose]);
-  return (
-    <div ref={ref} className="absolute bottom-16 left-0 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl p-3 w-72">
-      <div className="grid grid-cols-10 gap-0.5">
-        {EMOJIS.map((e) => (
-          <button key={e} onClick={() => { onPick(e); onClose(); }}
-            className="text-lg hover:scale-125 transition-transform p-0.5 rounded">{e}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
+// ─── Avatar universel (photo ou initiales) ────────────────────────────────────
+function Avatar({ user, size = "md" }) {
+  const [imgError, setImgError] = useState(false);
+  const ROLE_COLORS = { ETUDIANT: "from-green-500 to-emerald-600", ENSEIGNANT: "from-yellow-500 to-amber-600", ADMIN: "from-blue-500 to-indigo-600" };
+  const s = { xs: "w-6 h-6 text-[9px]", sm: "w-8 h-8 text-[10px]", md: "w-10 h-10 text-xs", lg: "w-12 h-12 text-sm" }[size];
+  const photoUrl = fullUrl(user?.photo_profil);
+  const gradient = ROLE_COLORS[user?.role] ?? "from-gray-400 to-gray-500";
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-function Avatar({ prenom, nom, role, size = "md" }) {
-  const s = { sm: "w-7 h-7 text-[10px]", md: "w-10 h-10 text-xs", lg: "w-12 h-12 text-sm" }[size];
+  useEffect(() => { setImgError(false); }, [user?.photo_profil]);
+
   return (
-    <div className={`${s} ${ROLE_COLORS[role] ?? "bg-gray-400"} rounded-full flex items-center justify-center text-white font-bold flex-shrink-0`}>
-      {getInitials(prenom, nom)}
+    <div className={`${s} rounded-full flex-shrink-0 overflow-hidden`}>
+      {photoUrl && !imgError ? (
+        <img
+          src={photoUrl} alt=""
+          className="w-full h-full object-cover"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <div className={`w-full h-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-bold`}>
+          {getInitials(user?.prenom, user?.nom)}
+        </div>
+      )}
     </div>
   );
 }
@@ -104,28 +96,42 @@ function Avatar({ prenom, nom, role, size = "md" }) {
 function MessageBubble({ msg, isMe, onDelete, convMembers = [] }) {
   const [hover, setHover] = useState(false);
 
-  // Coches : 1 coche grise = envoyé, 2 coches bleues = tous ont lu
   const othersCount = Math.max((convMembers.length || 0) - 1, 0);
   const readCount   = (msg.read_by || []).length;
-  // allRead uniquement pertinent pour l'expéditeur (isMe)
-  const allRead = isMe && othersCount > 0 && readCount >= othersCount;
+  const allRead     = isMe && othersCount > 0 && readCount >= othersCount;
 
   return (
-    <div className={`flex gap-2 mb-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      {!isMe && <Avatar prenom={msg.prenom} nom={msg.nom} role={msg.auteur_role} size="sm" />}
+    <div
+      className={`flex gap-2 mb-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      {/* ✅ Avatar avec photo de profil */}
+      {!isMe && (
+        <Avatar
+          user={{ prenom: msg.prenom, nom: msg.nom, role: msg.auteur_role, photo_profil: msg.photo_profil }}
+          size="sm"
+        />
+      )}
 
       <div className={`flex flex-col max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
-        {!isMe && <span className="text-[10px] text-gray-400 mb-1 px-1">{msg.prenom} {msg.nom}</span>}
+        {!isMe && (
+          <span className="text-[10px] text-gray-400 mb-1 px-1">{msg.prenom} {msg.nom}</span>
+        )}
 
-        <div className={`rounded-2xl px-4 py-2.5 ${isMe ? "bg-blue-600 text-white rounded-tr-sm" : "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-tl-sm shadow-sm"}`}>
+        <div className={`rounded-2xl px-4 py-2.5 ${
+          isMe
+            ? "bg-blue-600 text-white rounded-tr-sm"
+            : "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-tl-sm shadow-sm"
+        }`}>
           <RichText text={msg.contenu} isMe={isMe} />
 
           {/* Images */}
           {msg.images?.length > 0 && (
             <div className={`grid gap-1 mt-1 ${msg.images.length > 1 ? "grid-cols-2" : ""}`}>
               {msg.images.map((url, i) => (
-                <img key={i} src={fullUrl(url)} alt="" onClick={() => window.open(fullUrl(url), "_blank")}
+                <img key={i} src={fullUrl(url)} alt=""
+                  onClick={() => window.open(fullUrl(url), "_blank")}
                   className="rounded-xl max-h-48 w-full object-cover cursor-pointer hover:opacity-90 transition" />
               ))}
             </div>
@@ -138,11 +144,15 @@ function MessageBubble({ msg, isMe, onDelete, convMembers = [] }) {
                 const { Icon, color, bg } = fileMeta(f.nom_original);
                 return (
                   <a key={i} href={fullUrl(f.url)} download={f.nom_original} target="_blank" rel="noreferrer"
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition ${isMe ? "bg-white/15 hover:bg-white/25" : `${bg} hover:opacity-80`}`}>
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition ${
+                      isMe ? "bg-white/15 hover:bg-white/25" : `${bg} hover:opacity-80`
+                    }`}>
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isMe ? "bg-white/20" : bg}`}>
                       <Icon className={`h-4 w-4 ${isMe ? "text-white" : color}`} />
                     </div>
-                    <span className={`truncate flex-1 font-medium ${isMe ? "text-white" : "text-gray-700 dark:text-gray-200"}`}>{f.nom_original}</span>
+                    <span className={`truncate flex-1 font-medium ${isMe ? "text-white" : "text-gray-700 dark:text-gray-200"}`}>
+                      {f.nom_original}
+                    </span>
                     <Download className={`h-3.5 w-3.5 flex-shrink-0 ${isMe ? "text-white/70" : "text-gray-400"}`} />
                   </a>
                 );
@@ -154,8 +164,7 @@ function MessageBubble({ msg, isMe, onDelete, convMembers = [] }) {
         {/* Heure + statut lu */}
         <div className={`flex items-center gap-1 mt-0.5 px-1 ${isMe ? "flex-row-reverse" : ""}`}>
           <span className="text-[10px] text-gray-400">{formatTime(msg.created_at)}</span>
-          {/* ✅ Coches uniquement visibles par l'expéditeur */}
-          {isMe === true && (
+          {isMe && (
             allRead
               ? <CheckCheck className="h-3.5 w-3.5 text-blue-500" title="Lu" />
               : <Check className="h-3.5 w-3.5 text-gray-400" title="Envoyé" />
@@ -176,11 +185,22 @@ function MessageInput({ onSend }) {
   const [text, setText]           = useState("");
   const [files, setFiles]         = useState([]);
   const [showEmoji, setShowEmoji] = useState(false);
-  const fileRef  = useRef(null);
-  const textaRef = useRef(null);
-  // ✅ Ref pour toujours avoir la valeur courante au moment de l'envoi
-  const textRef  = useRef("");
+  const fileRef   = useRef(null);
+  const textaRef  = useRef(null);
+  const textRef   = useRef("");
+  const pickerRef = useRef(null);
   textRef.current = text;
+
+  // Fermer picker au clic dehors
+  useEffect(() => {
+    const handler = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowEmoji(false);
+      }
+    };
+    if (showEmoji) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showEmoji]);
 
   const addFiles = (e) => {
     Array.from(e.target.files || []).slice(0, 5 - files.length).forEach((f) => {
@@ -190,12 +210,14 @@ function MessageInput({ onSend }) {
     e.target.value = "";
   };
 
-  const insertEmoji = (emoji) => {
-    const ta  = textaRef.current;
-    const pos = ta?.selectionStart ?? textRef.current.length;
+  // ✅ Emoji-mart → onEmojiSelect
+  const handleEmojiSelect = (emojiObj) => {
+    const emoji = emojiObj.emoji;
+    const ta    = textaRef.current;
+    const pos   = ta?.selectionStart ?? textRef.current.length;
     const newText = textRef.current.slice(0, pos) + emoji + textRef.current.slice(pos);
     setText(newText);
-    // ✅ Repositionner le curseur après l'emoji
+    textRef.current = newText;
     setTimeout(() => {
       if (ta) {
         ta.focus();
@@ -207,9 +229,10 @@ function MessageInput({ onSend }) {
   const send = async () => {
     const currentText = textRef.current.trim();
     if (!currentText && files.length === 0) return;
-    // ✅ Utiliser textRef.current pour avoir la valeur réelle
     await onSend(currentText, files.map((f) => f.file));
-    setText(""); setFiles([]);
+    setText("");
+    textRef.current = "";
+    setFiles([]);
   };
 
   return (
@@ -235,13 +258,29 @@ function MessageInput({ onSend }) {
         </div>
       )}
 
-      {/* Emoji picker */}
-      {showEmoji && <EmojiPicker onPick={insertEmoji} onClose={() => setShowEmoji(false)} />}
+      {/* ✅ emoji-picker-react */}
+      {showEmoji && (
+        <div ref={pickerRef} className="absolute bottom-16 left-0 z-50">
+          <EmojiPicker
+            onEmojiClick={handleEmojiSelect}
+            lazyLoadEmojis
+            searchPlaceholder="Rechercher..."
+            skinTonesDisabled
+            previewConfig={{ showPreview: false }}
+            height={380}
+            width={320}
+          />
+        </div>
+      )}
 
       <div className="flex items-end gap-1.5">
-        <button onClick={() => setShowEmoji((v) => !v)}
-          className={`flex-shrink-0 p-2 rounded-xl transition ${showEmoji ? "bg-yellow-100 text-yellow-500" : "text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-950/20"}`}>
-          <Smile className="h-5 w-5" />
+        <button
+          onClick={() => setShowEmoji((v) => !v)}
+          className={`flex-shrink-0 p-2 rounded-xl transition text-xl leading-none ${
+            showEmoji ? "bg-yellow-100 text-yellow-500" : "text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-950/20"
+          }`}
+        >
+          😊
         </button>
 
         <button onClick={() => fileRef.current?.click()} disabled={files.length >= 5}
@@ -252,11 +291,16 @@ function MessageInput({ onSend }) {
         <input ref={fileRef} type="file" multiple className="hidden"
           accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" onChange={addFiles} />
 
-        <textarea ref={textaRef} value={text} rows={1} placeholder="Écrire un message..."
+        <textarea
+          ref={textaRef}
+          value={text}
+          rows={1}
+          placeholder="Écrire un message..."
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
           className="flex-1 resize-none bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 max-h-32 overflow-y-auto"
-          style={{ lineHeight: "1.5" }} />
+          style={{ lineHeight: "1.5" }}
+        />
 
         <button onClick={send} disabled={!text.trim() && files.length === 0}
           className="flex-shrink-0 w-9 h-9 rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 flex items-center justify-center text-white transition">
@@ -273,7 +317,7 @@ function GroupModal({ users, onClose, onCreate }) {
   const [sel, setSel]         = useState([]);
   const [search, setSearch]   = useState("");
   const [loading, setLoading] = useState(false);
-  const toggle = (id) => setSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  const toggle   = (id) => setSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const filtered = users.filter((u) => `${u.prenom} ${u.nom}`.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -295,15 +339,18 @@ function GroupModal({ users, onClose, onCreate }) {
             <div className="flex gap-1.5 flex-wrap">
               {sel.map((id) => { const u = users.find((x) => x.id === id); return u ? (
                 <span key={id} className="flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2.5 py-1 rounded-full">
-                  {u.prenom} {u.nom} <button onClick={() => toggle(id)}><X className="h-3 w-3" /></button>
-                </span>) : null; })}
+                  {u.prenom} {u.nom}
+                  <button onClick={() => toggle(id)}><X className="h-3 w-3" /></button>
+                </span>) : null;
+              })}
             </div>
           )}
           <div className="max-h-48 overflow-y-auto space-y-1">
             {filtered.map((u) => (
               <div key={u.id} onClick={() => toggle(u.id)}
                 className={`flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition ${sel.includes(u.id) ? "bg-blue-50 dark:bg-blue-950/30" : "hover:bg-gray-50 dark:hover:bg-gray-800"}`}>
-                <Avatar prenom={u.prenom} nom={u.nom} role={u.role} size="sm" />
+                {/* ✅ Photo dans modal groupe */}
+                <Avatar user={u} size="sm" />
                 <span className="text-sm text-gray-800 dark:text-white flex-1">{u.prenom} {u.nom}</span>
                 {sel.includes(u.id) && <CheckCheck className="h-4 w-4 text-blue-500" />}
               </div>
@@ -344,7 +391,8 @@ function PrivateModal({ users, onClose, onStart }) {
             {filtered.map((u) => (
               <div key={u.id} onClick={() => { onStart(u.id); onClose(); }}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-                <Avatar prenom={u.prenom} nom={u.nom} role={u.role} size="sm" />
+                {/* ✅ Photo dans modal privée */}
+                <Avatar user={u} size="sm" />
                 <div>
                   <p className="text-sm font-medium text-gray-800 dark:text-white">{u.prenom} {u.nom}</p>
                   <p className="text-xs text-gray-400">{u.role}</p>
@@ -363,22 +411,22 @@ export default function Messaging({ onUnreadChange }) {
   const socket = useSocket();
   const user   = JSON.parse(localStorage.getItem("user") || "{}");
 
-  const [conversations, setConvs]    = useState([]);
-  const [activeConv, setActiveConv]  = useState(null);
-  const [messages, setMessages]      = useState([]);
-  const [allUsers, setAllUsers]      = useState([]);
-  const [loadingC, setLoadingC]      = useState(true);
-  const [loadingM, setLoadingM]      = useState(false);
-  const [search, setSearch]          = useState("");
+  const [conversations, setConvs]     = useState([]);
+  const [activeConv, setActiveConv]   = useState(null);
+  const [messages, setMessages]       = useState([]);
+  const [allUsers, setAllUsers]       = useState([]);
+  const [loadingC, setLoadingC]       = useState(true);
+  const [loadingM, setLoadingM]       = useState(false);
+  const [search, setSearch]           = useState("");
   const [showPrivate, setShowPrivate] = useState(false);
-  const [showGroup, setShowGroup]    = useState(false);
-  const [mobileView, setMobileView]  = useState("list");
+  const [showGroup, setShowGroup]     = useState(false);
+  const [mobileView, setMobileView]   = useState("list");
 
   const bottomRef     = useRef(null);
   const activeConvRef = useRef(null);
   activeConvRef.current = activeConv;
 
-  // Notifier la navbar du total non lus
+  // Badge navbar
   useEffect(() => {
     const total = conversations.reduce((a, c) => a + (c.non_lus || 0), 0);
     onUnreadChange?.(total);
@@ -387,11 +435,7 @@ export default function Messaging({ onUnreadChange }) {
   // Chargement initial
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) {
-      console.warn("Messaging: pas de token, redirection login");
-      setLoadingC(false);
-      return;
-    }
+    if (!token) { setLoadingC(false); return; }
     (async () => {
       setLoadingC(true);
       try {
@@ -403,8 +447,7 @@ export default function Messaging({ onUnreadChange }) {
         setAllUsers(ur.data || []);
       } catch (e) {
         console.error("Messaging load error:", e.response?.status, e.response?.data);
-      }
-      finally { setLoadingC(false); }
+      } finally { setLoadingC(false); }
     })();
   }, []);
 
@@ -414,30 +457,45 @@ export default function Messaging({ onUnreadChange }) {
     conversations.forEach((c) => socket.emit("join_conv", { convId: c.id }));
 
     const onMsg = ({ convId, message }) => {
-      const active = activeConvRef.current;
-      const here   = active?.id === convId;
+      const here = activeConvRef.current?.id === convId;
       if (here) {
         setMessages((p) => p.some((m) => m.id === message.id) ? p : [...p, message]);
         apiClient.post(`/messaging/conversations/${convId}/lu`).catch(() => {});
       }
-      setConvs((p) => p.map((c) => c.id !== convId ? c : {
-        ...c, dernier_message: message,
-        non_lus: here ? 0 : (c.non_lus || 0) + 1,
-      }));
+      // ✅ Remonter la conversation en tête de liste + mettre à jour dernier message
+      setConvs((prev) => {
+        const updated = prev.map((c) =>
+          c.id !== convId ? c : {
+            ...c,
+            dernier_message: message,
+            non_lus: here ? 0 : (c.non_lus || 0) + 1,
+          }
+        );
+        // Tri : la conv avec le nouveau message passe en premier
+        return [
+          ...updated.filter((c) => c.id === convId),
+          ...updated.filter((c) => c.id !== convId),
+        ];
+      });
     };
 
-    const onDel    = ({ convId, msgId }) => {
-      if (activeConvRef.current?.id === convId) setMessages((p) => p.filter((m) => m.id !== msgId));
+    const onDel = ({ convId, msgId }) => {
+      if (activeConvRef.current?.id === convId)
+        setMessages((p) => p.filter((m) => m.id !== msgId));
     };
-    const onConv   = (conv) => {
+
+    const onConv = (conv) => {
       setConvs((p) => p.some((c) => c.id === conv.id) ? p : [conv, ...p]);
       socket.emit("join_conv", { convId: conv.id });
     };
-    // ✅ Mise à jour statut lu en temps réel
+
     const onRead = ({ convId, userId, lastReadId }) => {
       if (activeConvRef.current?.id === convId)
-        setMessages((p) => p.map((m) => m.id <= lastReadId
-          ? { ...m, read_by: [...new Set([...(m.read_by || []), userId])] } : m));
+        setMessages((p) => p.map((m) =>
+          m.id <= lastReadId
+            ? { ...m, read_by: [...new Set([...(m.read_by || []), userId])] }
+            : m
+        ));
     };
 
     socket.on("new_message",      onMsg);
@@ -453,13 +511,14 @@ export default function Messaging({ onUnreadChange }) {
   }, [socket, conversations]);
 
   // Auto-scroll
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const openConv = async (conv) => {
     setActiveConv(conv); setMobileView("chat"); setLoadingM(true);
     try {
-      const res = await apiClient.get(`/messaging/conversations/${conv.id}/messages`);
-      // ✅ S'assurer que read_by est initialisé pour chaque message
+      const res  = await apiClient.get(`/messaging/conversations/${conv.id}/messages`);
       const msgs = (res.data || []).map((m) => ({ ...m, read_by: m.read_by || [] }));
       setMessages(msgs);
       setConvs((p) => p.map((c) => c.id === conv.id ? { ...c, non_lus: 0 } : c));
@@ -483,7 +542,8 @@ export default function Messaging({ onUnreadChange }) {
 
   const handleDelete = async (msgId) => {
     if (!activeConv) return;
-    try { await apiClient.delete(`/messaging/conversations/${activeConv.id}/messages/${msgId}`); } catch (e) { console.error(e); }
+    try { await apiClient.delete(`/messaging/conversations/${activeConv.id}/messages/${msgId}`); }
+    catch (e) { console.error(e); }
   };
 
   const handlePrivate = async (userId) => {
@@ -502,16 +562,22 @@ export default function Messaging({ onUnreadChange }) {
     } catch (e) { console.error(e); }
   };
 
-  const convName   = (c) => c.type === "groupe" ? c.nom : (c.membres?.find((m) => m.id !== user.id) ? `${c.membres.find((m) => m.id !== user.id).prenom} ${c.membres.find((m) => m.id !== user.id).nom}` : "Conversation");
-  const convAvatar = (c) => c.type === "groupe" ? null : c.membres?.find((m) => m.id !== user.id);
+  const convName = (c) =>
+    c.type === "groupe"
+      ? c.nom
+      : (c.membres?.find((m) => m.id !== user.id)
+          ? `${c.membres.find((m) => m.id !== user.id).prenom} ${c.membres.find((m) => m.id !== user.id).nom}`
+          : "Conversation");
+
+  const convOtherMember = (c) => c.type !== "groupe" ? c.membres?.find((m) => m.id !== user.id) : null;
 
   const filtered    = conversations.filter((c) => convName(c).toLowerCase().includes(search.toLowerCase()));
   const totalUnread = conversations.reduce((a, c) => a + (c.non_lus || 0), 0);
 
   return (
-    <div className="flex h-[calc(100vh-80px)] bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
+    <div className="flex h-[calc(100vh-150px)] bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
 
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      {/* ── Sidebar conversations ────────────────────────────────────────── */}
       <div className={`w-full md:w-80 flex-shrink-0 border-r border-gray-100 dark:border-gray-800 flex flex-col ${mobileView === "chat" ? "hidden md:flex" : "flex"}`}>
         <div className="px-4 py-4 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center justify-between mb-3">
@@ -541,49 +607,63 @@ export default function Messaging({ onUnreadChange }) {
           </div>
         </div>
 
+        {/* Liste des conversations */}
         <div className="flex-1 overflow-y-auto">
-          {loadingC ? <div className="flex justify-center py-10"><Loader className="h-5 w-5 animate-spin text-blue-500" /></div>
-          : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-              <Send className="h-8 w-8 text-gray-300 mb-3" />
-              <p className="text-sm text-gray-500">Aucune conversation</p>
-            </div>
-          ) : filtered.map((c) => {
-            const name    = convName(c);
-            const av      = convAvatar(c);
-            const active  = activeConv?.id === c.id;
-            const unread  = (c.non_lus || 0) > 0;
-            return (
-              <div key={c.id} onClick={() => openConv(c)}
-                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition border-l-2 ${active ? "bg-blue-50 dark:bg-blue-950/20 border-blue-500" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 border-transparent"}`}>
-                {c.type === "groupe"
-                  ? <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center text-white flex-shrink-0"><Users className="h-5 w-5" /></div>
-                  : av ? <Avatar prenom={av.prenom} nom={av.nom} role={av.role} />
-                  : <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1 min-w-0">
-                      <span className={`text-sm truncate ${unread ? "font-bold text-gray-900 dark:text-white" : "font-medium text-gray-700 dark:text-gray-300"}`}>{name}</span>
-                      {c.type === "groupe" && <Lock className="h-3 w-3 text-gray-400 flex-shrink-0" />}
-                    </div>
-                    <span className={`text-[10px] flex-shrink-0 ml-2 ${unread ? "text-blue-600 font-medium" : "text-gray-400"}`}>
-                      {c.dernier_message ? formatTime(c.dernier_message.created_at) : ""}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between mt-0.5">
-                    <p className={`text-xs truncate ${unread ? "text-gray-700 dark:text-gray-300 font-medium" : "text-gray-400"}`}>
-                      {c.dernier_message ? (c.dernier_message.contenu || "📎 Pièce jointe") : "Aucun message"}
-                    </p>
-                    {unread && (
-                      <span className="ml-2 min-w-[18px] h-[18px] px-1 bg-blue-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
-                        {c.non_lus > 9 ? "9+" : c.non_lus}
-                      </span>
-                    )}
-                  </div>
-                </div>
+          {loadingC
+            ? <div className="flex justify-center py-10"><Loader className="h-5 w-5 animate-spin text-blue-500" /></div>
+            : filtered.length === 0
+            ? <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                <Send className="h-8 w-8 text-gray-300 mb-3" />
+                <p className="text-sm text-gray-500">Aucune conversation</p>
               </div>
-            );
-          })}
+            : filtered.map((c) => {
+                const name   = convName(c);
+                const other  = convOtherMember(c);
+                const active = activeConv?.id === c.id;
+                const unread = (c.non_lus || 0) > 0;
+                return (
+                  <div key={c.id} onClick={() => openConv(c)}
+                    className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition border-l-2 ${
+                      active
+                        ? "bg-blue-50 dark:bg-blue-950/20 border-blue-500"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800/50 border-transparent"
+                    }`}>
+                    {/* ✅ Avatar photo dans la liste */}
+                    {c.type === "groupe"
+                      ? <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white flex-shrink-0">
+                          <Users className="h-5 w-5" />
+                        </div>
+                      : other
+                        ? <Avatar user={other} size="md" />
+                        : <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0" />
+                    }
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className={`text-sm truncate ${unread ? "font-bold text-gray-900 dark:text-white" : "font-medium text-gray-700 dark:text-gray-300"}`}>
+                            {name}
+                          </span>
+                          {c.type === "groupe" && <Lock className="h-3 w-3 text-gray-400 flex-shrink-0" />}
+                        </div>
+                        <span className={`text-[10px] flex-shrink-0 ml-2 ${unread ? "text-blue-600 font-medium" : "text-gray-400"}`}>
+                          {c.dernier_message ? formatTime(c.dernier_message.created_at) : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className={`text-xs truncate ${unread ? "text-gray-700 dark:text-gray-300 font-medium" : "text-gray-400"}`}>
+                          {c.dernier_message ? (c.dernier_message.contenu || "📎 Pièce jointe") : "Aucun message"}
+                        </p>
+                        {unread && (
+                          <span className="ml-2 min-w-[18px] h-[18px] px-1 bg-blue-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
+                            {c.non_lus > 9 ? "9+" : c.non_lus}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+          }
         </div>
       </div>
 
@@ -599,20 +679,30 @@ export default function Messaging({ onUnreadChange }) {
           </div>
         ) : (
           <>
+            {/* Header chat */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
               <button onClick={() => setMobileView("list")} className="md:hidden text-gray-500">
                 <ChevronLeft className="h-5 w-5" />
               </button>
+              {/* ✅ Photo dans le header de la conversation */}
               {activeConv.type === "groupe"
-                ? <div className="w-9 h-9 rounded-full bg-purple-500 flex items-center justify-center text-white flex-shrink-0"><Users className="h-4 w-4" /></div>
-                : (() => { const o = convAvatar(activeConv); return o ? <Avatar prenom={o.prenom} nom={o.nom} role={o.role} size="sm" /> : null; })()
+                ? <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white flex-shrink-0">
+                    <Users className="h-4 w-4" />
+                  </div>
+                : (() => {
+                    const o = convOtherMember(activeConv);
+                    return o ? <Avatar user={o} size="sm" /> : null;
+                  })()
               }
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{convName(activeConv)}</p>
-                {activeConv.type === "groupe" && <p className="text-xs text-gray-400">{activeConv.membres?.length ?? 0} membres</p>}
+                {activeConv.type === "groupe" && (
+                  <p className="text-xs text-gray-400">{activeConv.membres?.length ?? 0} membres</p>
+                )}
               </div>
             </div>
 
+            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-950">
               {loadingM
                 ? <div className="flex justify-center py-10"><Loader className="h-5 w-5 animate-spin text-blue-500" /></div>
@@ -623,8 +713,13 @@ export default function Messaging({ onUnreadChange }) {
                   </div>
                 : <>
                     {messages.map((msg) => (
-                      <MessageBubble key={msg.id} msg={msg} isMe={Number(msg.auteur_id) === Number(user.id)}
-                        onDelete={handleDelete} convMembers={activeConv.membres} />
+                      <MessageBubble
+                        key={msg.id}
+                        msg={msg}
+                        isMe={Number(msg.auteur_id) === Number(user.id)}
+                        onDelete={handleDelete}
+                        convMembers={activeConv.membres}
+                      />
                     ))}
                     <div ref={bottomRef} />
                   </>

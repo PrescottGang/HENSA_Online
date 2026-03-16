@@ -84,12 +84,15 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/auth',          require('./routes/auth'));
 app.use('/api/users',         require('./routes/users'));
+app.use('/api/profil',        require('./routes/profil'));
 app.use('/api/annees',        require('./routes/annees'));
 app.use('/api/filieres',      require('./routes/filiere'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/notifications', require('./routes/notifications').router);
 app.use('/api/publications',  require('./routes/publications'));
 app.use('/api/messaging',     require('./routes/messaging'));
+app.use('/api/matieres',      require('./routes/matieres'));
+app.use('/api/cours', require('./routes/cours'));
 
 // Health check
 app.get('/api/health', (req, res) => {

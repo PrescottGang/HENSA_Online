@@ -8,7 +8,8 @@ import { useSocket } from "../hooks/useSocket";
 import axios from "axios";
 
 const API      = "http://localhost:5000/api";
-const BASE_URL = "http://localhost:5000"; // ✅ pour les images
+const BASE_URL = "http://localhost:5000";
+const fullUrl = (url) => !url ? null : url.startsWith("http") ? url : `${BASE_URL}${url}`; // ✅ pour les images
 const apiClient = axios.create({ baseURL: API });
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
@@ -101,7 +102,7 @@ function ImageCarousel({ images }) {
 // ─── Composer ─────────────────────────────────────────────────────────────────
 function Composer({ user, onPublish }) {
   const [content, setContent]       = useState("");
-  const [images, setImages]         = useState([]); // [{ preview, file }]
+  const [images, setImages]         = useState([]); // [{ preview, base64 }]
   const [focused, setFocused]       = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef(null);
@@ -227,7 +228,7 @@ function Composer({ user, onPublish }) {
 }
 
 // ─── Publication Card ──────────────────────────────────────────────────────────
-function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComment }) {
+function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComment, onNavigate }) {
   const [showComments, setShowComments]   = useState(false);
   const [comments, setComments]           = useState([]);
   const [loadingCom, setLoadingCom]       = useState(false);
@@ -236,6 +237,7 @@ function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComme
   const [submittingCom, setSubmittingCom] = useState(false);
 
   const isAuthor = pub.auteur_id === user.id;
+  const isAdmin  = user.role === "ADMIN";
 
   const toggleComments = async () => {
     if (!showComments && comments.length === 0 && pub.nb_commentaires > 0) {
@@ -277,14 +279,21 @@ function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComme
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-            {getInitials(pub.prenom, pub.nom)}
-          </div>
+          {/* ✅ Avatar cliquable → profil */}
+          <button onClick={() => onNavigate?.(pub.auteur_id)} className="flex-shrink-0 hover:opacity-80 transition">
+            {pub.photo_profil ? (
+              <img src={fullUrl(pub.photo_profil)} alt="" className="w-10 h-10 rounded-full object-cover border border-gray-200" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+            ) : null}
+            <div className={`w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold ${pub.photo_profil ? 'hidden' : ''}`}>
+              {getInitials(pub.prenom, pub.nom)}
+            </div>
+          </button>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-gray-900 dark:text-white">
+              {/* ✅ Nom cliquable → profil */}
+              <button onClick={() => onNavigate?.(pub.auteur_id)} className="text-sm font-semibold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition">
                 {pub.prenom} {pub.nom}
-              </span>
+              </button>
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${ROLE_STYLE[pub.auteur_role] ?? "bg-gray-100 text-gray-600"}`}>
                 {ROLE_LABEL[pub.auteur_role] ?? pub.auteur_role}
               </span>
@@ -363,13 +372,19 @@ function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComme
             ) : (
               comments.map((c) => (
                 <div key={c.id} className="flex gap-2.5 group">
-                  <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-                    {getInitials(c.prenom, c.nom)}
-                  </div>
+                  {/* ✅ Avatar commentateur cliquable → profil */}
+                  <button onClick={() => onNavigate?.(c.auteur_id)} className="flex-shrink-0 hover:opacity-80 transition">
+                    {c.photo_profil ? (
+                      <img src={fullUrl(c.photo_profil)} alt="" className="w-7 h-7 rounded-full object-cover border border-gray-200" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+                    ) : null}
+                    <div className={`w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold ${c.photo_profil ? 'hidden' : ''}`}>
+                      {getInitials(c.prenom, c.nom)}
+                    </div>
+                  </button>
                   <div className="flex-1 min-w-0">
                     <div className="bg-gray-100 dark:bg-gray-800 rounded-xl px-3 py-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-semibold text-gray-800 dark:text-white">{c.prenom} {c.nom}</span>
+                        <button onClick={() => onNavigate?.(c.auteur_id)} className="text-xs font-semibold text-gray-800 dark:text-white hover:text-indigo-600 transition">{c.prenom} {c.nom}</button>
                         <span className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase ${ROLE_STYLE[c.auteur_role] ?? "bg-gray-100 text-gray-600"}`}>
                           {ROLE_LABEL[c.auteur_role] ?? c.auteur_role}
                         </span>
@@ -396,7 +411,11 @@ function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComme
 
             {/* Saisie commentaire */}
             <div className="flex gap-2.5 items-center pt-1">
-              <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+              {/* ✅ Photo de profil utilisateur courant */}
+              {user.photo_profil ? (
+                <img src={fullUrl(user.photo_profil)} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0 border border-gray-200" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+              ) : null}
+              <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 ${user.photo_profil ? 'hidden' : ''}`}>
                 {getInitials(user.prenom, user.nom)}
               </div>
               <div className="flex-1 flex items-center gap-2">
@@ -425,7 +444,7 @@ function PublicationCard({ pub, user, onLike, onComment, onDelete, onDeleteComme
 }
 
 // ─── Feed principal ────────────────────────────────────────────────────────────
-export default function PublicationsFeed() {
+export default function PublicationsFeed({ onNavigateToProfile }) {
   const socket = useSocket();
   const user   = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -469,11 +488,26 @@ export default function PublicationsFeed() {
         return { ...p, nb_commentaires: Math.max(0, (p.nb_commentaires || 1) - 1) };
       }));
 
+    // ✅ Mise à jour photo/nom d'un utilisateur en temps réel
+    const onUserUpdated = ({ id, nom, prenom, photo_profil }) => {
+      setPubs((prev) => prev.map((p) => {
+        // Mettre à jour l'auteur de la publication
+        const updated = { ...p };
+        if (Number(p.auteur_id) === Number(id)) {
+          if (nom)         updated.nom = nom;
+          if (prenom)      updated.prenom = prenom;
+          if (photo_profil) updated.photo_profil = photo_profil;
+        }
+        return updated;
+      }));
+    };
+
     socket.on("new_publication",    onNewPub);
     socket.on("delete_publication", onDeletePub);
     socket.on("update_likes",       onUpdateLikes);
     socket.on("new_comment",        onNewComment);
     socket.on("delete_comment",     onDeleteComment);
+    socket.on("userUpdated",        onUserUpdated);
 
     return () => {
       socket.off("new_publication",    onNewPub);
@@ -481,6 +515,7 @@ export default function PublicationsFeed() {
       socket.off("update_likes",       onUpdateLikes);
       socket.off("new_comment",        onNewComment);
       socket.off("delete_comment",     onDeleteComment);
+      socket.off("userUpdated",        onUserUpdated);
     };
   }, [socket, user.id]);
 
@@ -516,48 +551,35 @@ export default function PublicationsFeed() {
   };
 
   return (
-    <div className="h-screen flex flex-col">
-      {/* Container d'ajout fixe en haut */}
-      {canPublish && (
-        <div className="flex-none px-4 pt-4 pb-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
-          <div className="max-w-2xl mx-auto w-full">
-            <Composer user={user} onPublish={handlePublish} />
-          </div>
-        </div>
-      )}
+    <div className="max-w-2xl mx-auto flex flex-col gap-5">
+      {canPublish && <Composer user={user} onPublish={handlePublish} />}
 
-      {/* Zone de contenu scrollable */}
-      <div className="flex-1 overflow-y-auto px-4">
-        <div className="max-w-2xl mx-auto py-4">
-          {loading ? (
-            <div className="flex justify-center py-16">
-              <Loader className="h-6 w-6 animate-spin text-blue-500" />
-            </div>
-          ) : publications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
-                <MessageCircle className="h-7 w-7 text-gray-400" />
-              </div>
-              <p className="text-gray-500 text-sm">Aucune publication pour le moment.</p>
-              <p className="text-gray-400 text-xs mt-1">Soyez le premier à partager quelque chose !</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-5">
-              {publications.map((pub) => (
-                <PublicationCard
-                  key={pub.id}
-                  pub={pub}
-                  user={user}
-                  onLike={handleLike}
-                  onComment={handleComment}
-                  onDelete={handleDelete}
-                  onDeleteComment={handleDeleteComment}
-                />
-              ))}
-            </div>
-          )}
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Loader className="h-6 w-6 animate-spin text-blue-500" />
         </div>
-      </div>
+      ) : publications.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
+            <MessageCircle className="h-7 w-7 text-gray-400" />
+          </div>
+          <p className="text-gray-500 text-sm">Aucune publication pour le moment.</p>
+          <p className="text-gray-400 text-xs mt-1">Soyez le premier à partager quelque chose !</p>
+        </div>
+      ) : (
+        publications.map((pub) => (
+          <PublicationCard
+            key={pub.id}
+            pub={pub}
+            user={user}
+            onLike={handleLike}
+            onComment={handleComment}
+            onDelete={handleDelete}
+            onDeleteComment={handleDeleteComment}
+            onNavigate={onNavigateToProfile}
+          />
+        ))
+      )}
     </div>
   );
 }

@@ -154,7 +154,7 @@ router.get("/etudiants", async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        u.id, u.nom, u.prenom, u.email, u.statut,
+        u.id, u.nom, u.prenom, u.email, u.statut, u.photo AS photo_profil,
         e.matricule, e.classe_id,
         f.nom AS filiere_nom,
         n.nom AS niveau_nom,
@@ -180,7 +180,7 @@ router.get("/enseignants", async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT 
-        u.id, u.nom, u.prenom, u.email, u.statut,
+        u.id, u.nom, u.prenom, u.email, u.statut, u.photo AS photo_profil,
         e.specialite, e.grade
       FROM enseignant e
       INNER JOIN utilisateur u ON e.id = u.id
@@ -201,13 +201,18 @@ router.get("/:id", async (req, res) => {
     const [rows] = await db.query(`
       SELECT 
         u.id, u.nom, u.prenom, u.email, u.statut, u.role,
-        e.matricule, e.niveau, e.classe_id,
-        c.nom AS classe_nom,
+        u.photo AS photo_profil,
+        e.matricule, e.classe_id,
+        f.nom  AS filiere_nom,
+        n.nom  AS niveau_nom,
+        n.cycle,
         en.specialite, en.grade
       FROM utilisateur u
-      LEFT JOIN etudiant e ON u.id = e.id
-      LEFT JOIN enseignant en ON u.id = en.id
-      LEFT JOIN classe c ON e.classe_id = c.id
+      LEFT JOIN etudiant    e  ON u.id = e.id
+      LEFT JOIN enseignant  en ON u.id = en.id
+      LEFT JOIN classe      c  ON e.classe_id = c.id
+      LEFT JOIN filiere     f  ON c.filiere_id = f.id
+      LEFT JOIN niveau      n  ON c.niveau_id  = n.id
       WHERE u.id = ?
     `, [req.params.id]);
 

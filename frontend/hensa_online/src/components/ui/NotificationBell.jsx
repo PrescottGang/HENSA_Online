@@ -1,134 +1,50 @@
 // src/components/NotificationBell.jsx
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Bell, X, Calendar, CheckCheck, Loader,
-  Megaphone, Heart, MessageCircle, FileText, Send
+  Megaphone, Heart, MessageCircle, FileText, Send,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useSocket } from "../hooks/useSocket";
-import { useNotificationSound } from "../hooks/useNotificationSound";
-import axios from "axios";
-
-const API = "http://localhost:5000/api";
-const apiClient = axios.create({ baseURL: API });
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+import { useNotifications } from "./NotificationContext";
 
 const TYPE_CONFIG = {
   announcement: {
-    icon:      Megaphone,
-    iconBg:    "bg-blue-100 dark:bg-blue-900",
-    iconColor: "text-blue-600 dark:text-blue-400",
-    dotColor:  "bg-blue-500",
-    label:     "Annonce",
-    labelBg:   "bg-blue-100 text-blue-700",
+    icon: Megaphone, iconBg: "bg-blue-100 dark:bg-blue-900",
+    iconColor: "text-blue-600 dark:text-blue-400", dotColor: "bg-blue-500",
+    label: "Annonce", labelBg: "bg-blue-100 text-blue-700",
   },
   like: {
-    icon:      Heart,
-    iconBg:    "bg-red-100 dark:bg-red-900",
-    iconColor: "text-red-500",
-    dotColor:  "bg-red-500",
-    label:     "Like",
-    labelBg:   "bg-red-100 text-red-600",
+    icon: Heart, iconBg: "bg-red-100 dark:bg-red-900",
+    iconColor: "text-red-500", dotColor: "bg-red-500",
+    label: "Like", labelBg: "bg-red-100 text-red-600",
   },
   comment: {
-    icon:      MessageCircle,
-    iconBg:    "bg-green-100 dark:bg-green-900",
-    iconColor: "text-green-600",
-    dotColor:  "bg-green-500",
-    label:     "Commentaire",
-    labelBg:   "bg-green-100 text-green-700",
+    icon: MessageCircle, iconBg: "bg-green-100 dark:bg-green-900",
+    iconColor: "text-green-600", dotColor: "bg-green-500",
+    label: "Commentaire", labelBg: "bg-green-100 text-green-700",
   },
   publication: {
-    icon:      FileText,
-    iconBg:    "bg-purple-100 dark:bg-purple-900",
-    iconColor: "text-purple-600",
-    dotColor:  "bg-purple-500",
-    label:     "Publication",
-    labelBg:   "bg-purple-100 text-purple-700",
+    icon: FileText, iconBg: "bg-purple-100 dark:bg-purple-900",
+    iconColor: "text-purple-600", dotColor: "bg-purple-500",
+    label: "Publication", labelBg: "bg-purple-100 text-purple-700",
   },
   message: {
-    icon:      Send,
-    iconBg:    "bg-blue-100 dark:bg-blue-900",
-    iconColor: "text-blue-500",
-    dotColor:  "bg-blue-500",
-    label:     "Message",
-    labelBg:   "bg-blue-100 text-blue-600",
+    icon: Send, iconBg: "bg-blue-100 dark:bg-blue-900",
+    iconColor: "text-blue-500", dotColor: "bg-blue-500",
+    label: "Message", labelBg: "bg-blue-100 text-blue-600",
   },
 };
-
 const getConfig = (type) => TYPE_CONFIG[type] || TYPE_CONFIG.announcement;
 
 export default function NotificationBell() {
-  const socket   = useSocket();
-  const navigate = useNavigate();
-  const { play } = useNotificationSound();
+  const navigate  = useNavigate();
+  const panelRef  = useRef(null);
+  const [open, setOpen] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const { notifications, loading, unreadCount, markAsRead, markAllRead, deleteNotif, clearAll } =
+    useNotifications();
 
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading]             = useState(false);
-  const [open, setOpen]                   = useState(false);
-  const panelRef = useRef(null);
-
-  const unreadCount = notifications.filter((n) => !n.lu).length;
-
-  // ─── Debug : tracer l'état du socket ──────────────────────────────────────
-  useEffect(() => {
-    console.log("🔔 NotificationBell — socket:", socket?.id ?? "null", "| user:", user?.id, "| role:", user?.role);
-  }, [socket]);
-
-  // ─── Charger depuis la base ────────────────────────────────────────────────
-  const fetchNotifications = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await apiClient.get("/notifications");
-      setNotifications(res.data || []);
-    } catch (err) {
-      console.error("Erreur notifications:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
-
-  // ─── Socket : écouter les nouvelles notifications ─────────────────────────
-  useEffect(() => {
-    if (!socket) {
-      console.warn("⚠️ NotificationBell : socket non disponible, listeners non attachés");
-      return;
-    }
-
-    console.log("✅ NotificationBell : socket prêt, attachment du listener new_notification");
-
-    const handleNew = (notif) => {
-      console.log("🔔 new_notification reçu :", notif);
-      setNotifications((prev) => {
-        const exists = prev.some((n) => n.id === notif.id);
-        if (exists) return prev;
-        return [{ ...notif, lu: false }, ...prev];
-      });
-      play(notif.type || "default");
-    };
-
-    socket.on("new_notification", handleNew);
-
-    // ✅ S'assurer que la room privée est bien rejointe
-    if (user?.id) {
-      socket.emit("join_user", { userId: user.id });
-      console.log(`🔒 join_user émis → user_${user.id}`);
-    }
-
-    return () => {
-      socket.off("new_notification", handleNew);
-    };
-  }, [socket, play, user?.id]);
-
-  // ─── Fermer si clic en dehors ──────────────────────────────────────────────
+  // ─── Fermer si clic en dehors ────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false);
@@ -137,37 +53,18 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
-  const markAllRead = async () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, lu: true })));
-    try { await apiClient.patch("/notifications/lire-tout"); } catch (e) { console.error(e); }
-  };
-
   const handleClick = async (notif) => {
-    setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, lu: true } : n));
-    try { await apiClient.patch(`/notifications/${notif.id}/lu`); } catch (e) { console.error(e); }
+    await markAsRead(notif);
     setOpen(false);
     if (notif.lien) navigate(notif.lien, { state: { highlightId: notif.entite_id } });
   };
 
-  const removeNotif = async (e, notif) => {
-    e.stopPropagation();
-    setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
-    try { await apiClient.delete(`/notifications/${notif.id}`); } catch (e) { console.error(e); }
-  };
-
-  const clearAll = async () => {
-    setNotifications([]);
-    try { await apiClient.delete("/notifications"); } catch (e) { console.error(e); }
-  };
-
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="relative" ref={panelRef}>
 
       {/* Cloche */}
       <button
-        onClick={() => { setOpen((prev) => !prev); if (!open) markAllRead(); }}
+        onClick={() => setOpen((prev) => !prev)}
         className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
       >
         <Bell className="h-5 w-5 text-gray-600 dark:text-gray-300" />
@@ -193,7 +90,10 @@ export default function NotificationBell() {
               )}
             </span>
             {notifications.length > 0 && (
-              <button onClick={markAllRead} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition">
+              <button
+                onClick={markAllRead}
+                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition"
+              >
                 <CheckCheck className="h-3 w-3" /> Tout lu
               </button>
             )}
@@ -262,7 +162,7 @@ export default function NotificationBell() {
                     </div>
 
                     <button
-                      onClick={(e) => removeNotif(e, n)}
+                      onClick={(e) => { e.stopPropagation(); deleteNotif(n); }}
                       className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-gray-500 transition mt-0.5 flex-shrink-0"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -277,10 +177,10 @@ export default function NotificationBell() {
           {notifications.length > 0 && (
             <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <button
-                onClick={() => { navigate("/annonces"); setOpen(false); }}
+                onClick={() => { navigate("/notifications"); setOpen(false); }}
                 className="text-xs text-blue-600 hover:text-blue-800 transition"
               >
-                Voir les annonces
+                Voir toutes les notifications
               </button>
               <button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-500 transition">
                 Tout effacer

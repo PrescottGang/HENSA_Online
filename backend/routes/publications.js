@@ -56,7 +56,7 @@ const getPublication = async (id, currentUserId = null) => {
   const [rows] = await db.query(
     `SELECT
        p.*,
-       u.prenom, u.nom, u.role AS auteur_role,
+       u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil,
        (SELECT COUNT(*) FROM like_publication l WHERE l.publication_id = p.id) AS nb_likes,
        (SELECT COUNT(*) FROM commentaire c WHERE c.publication_id = p.id)      AS nb_commentaires
        ${currentUserId ? ", (SELECT COUNT(*) FROM like_publication WHERE publication_id = p.id AND user_id = ?) AS liked_by_me" : ""}
@@ -84,7 +84,7 @@ router.get("/", authenticate, async (req, res) => {
     const [publications] = await db.query(
       `SELECT
          p.*,
-         u.prenom, u.nom, u.role AS auteur_role,
+         u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil,
          (SELECT COUNT(*) FROM like_publication l WHERE l.publication_id = p.id) AS nb_likes,
          (SELECT COUNT(*) FROM commentaire c    WHERE c.publication_id = p.id)   AS nb_commentaires
        FROM publication p
@@ -130,7 +130,7 @@ router.get("/", authenticate, async (req, res) => {
 router.get("/:id/commentaires", authenticate, async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT c.*, u.prenom, u.nom, u.role AS auteur_role
+      `SELECT c.*, u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil
        FROM commentaire c
        JOIN utilisateur u ON u.id = c.auteur_id
        WHERE c.publication_id = ?
@@ -294,7 +294,7 @@ router.post("/:id/commentaires", authenticate, async (req, res) => {
     );
 
     const [[comment]] = await db.query(
-      `SELECT c.*, u.prenom, u.nom, u.role AS auteur_role
+      `SELECT c.*, u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil
        FROM commentaire c
        JOIN utilisateur u ON u.id = c.auteur_id
        WHERE c.id = ?`,

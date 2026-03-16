@@ -67,7 +67,7 @@ const enrichConversation = async (conv, userId) => {
   const dateCol = await getMsgDateCol();
   // Membres
   const [membres] = await db.query(
-    `SELECT u.id, u.prenom, u.nom, u.role
+    `SELECT u.id, u.prenom, u.nom, u.role, u.photo AS photo_profil
      FROM conversation_membre cm
      JOIN utilisateur u ON u.id = cm.user_id
      WHERE cm.conversation_id = ?`,
@@ -110,11 +110,12 @@ const enrichConversation = async (conv, userId) => {
 router.get("/conversations", authenticate, async (req, res) => {
   try {
     const [convs] = await db.query(
-      `SELECT c.*, u.prenom AS createur_prenom, u.nom AS createur_nom
+      `SELECT c.*, u.prenom AS createur_prenom, u.nom AS createur_nom,
+              (SELECT MAX(m.id) FROM message m WHERE m.conversation_id = c.id) AS last_msg_id
        FROM conversation c
        JOIN conversation_membre cm ON cm.conversation_id = c.id AND cm.user_id = ?
        JOIN utilisateur u ON u.id = c.createur_id
-       ORDER BY c.created_at DESC`,
+       ORDER BY last_msg_id DESC, c.created_at DESC`,
       [req.user.id]
     );
 
@@ -155,7 +156,7 @@ router.get("/conversations/:id/messages", authenticate, async (req, res) => {
 
     const [messages] = await db.query(
       `SELECT m.*, m.${dateCol} AS created_at,
-              u.prenom, u.nom, u.role AS auteur_role
+              u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil
        FROM message m
        JOIN utilisateur u ON u.id = m.auteur_id
        WHERE m.conversation_id = ?
@@ -349,7 +350,7 @@ router.post("/conversations/:id/messages", authenticate, upload.array("images", 
     // Récupérer le message complet
     const dateCol2 = await getMsgDateCol();
     const [[msg]] = await db.query(
-      `SELECT m.*, m.${dateCol2} AS created_at, u.prenom, u.nom, u.role AS auteur_role
+      `SELECT m.*, m.${dateCol2} AS created_at, u.prenom, u.nom, u.role AS auteur_role, u.photo AS photo_profil
        FROM message m JOIN utilisateur u ON u.id = m.auteur_id WHERE m.id = ?`,
       [msgId]
     );
@@ -462,7 +463,7 @@ router.delete("/conversations/:convId/messages/:msgId", authenticate, async (req
 router.get("/utilisateurs", authenticate, async (req, res) => {
   try {
     const [users] = await db.query(
-      "SELECT id, prenom, nom, role FROM utilisateur WHERE id != ? ORDER BY prenom, nom",
+      "SELECT id, prenom, nom, role, photo AS photo_profil FROM utilisateur WHERE id != ? ORDER BY prenom, nom",
       [req.user.id]
     );
     res.json(users);
