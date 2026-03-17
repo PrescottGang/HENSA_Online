@@ -1,19 +1,35 @@
-import { useState } from "react";
+// src/components/ui/Dashboard.jsx
+import { useState, useEffect } from "react";
 import { useAuth } from "../../lib/auth-context";
-import DashboardSidebar from "./DashboardSidebar";
-import DashboardHeader from "./DashboardHeader";
-import Users from "../dashbord/Users";
-import AnneeAcademique from "../dashbord/AnneeAcademique";
-import Announcement from "../dashbord/Announcement";
-import Filieres from "../dashbord/Filieres";
-import PublicationsFeed from "../dashbord/PublicationsFeed";
-import Messaging from "../dashbord/Messaging";
-import Notification from "../dashbord/Notification";
-import Matiere from "../dashbord/Matieres";
-import Profil from "../dashbord/Profil";
-import UserProfil from "../dashbord/UserProfil"; // ✅ Profil public
-import EmploiDuTemps from "../dashbord/EmploiDuTemps";
-import Notes from "../dashbord/Notes";
+import DashboardSidebar    from "../ui/DashboardSidebar";
+import DashboardHeader     from "../ui/DashboardHeader";
+
+// Pages communes
+import PublicationsFeed    from "../dashbord/PublicationsFeed";
+import Messaging           from "../dashbord/Messaging";
+import Notification        from "../dashbord/Notification";
+import Announcement        from "../dashbord/Announcement";
+import Profil              from "../dashbord/Profil";
+import UserProfil          from "../dashbord/UserProfil";
+import EmploiDuTemps       from "../dashbord/EmploiDuTemps";
+import Notes               from "../dashbord/Notes";
+
+// Pages Admin
+import Users               from "../dashbord/Users";
+import AnneeAcademique     from "../dashbord/AnneeAcademique";
+import Filieres            from "../dashbord/Filieres";
+import Matiere             from "../dashbord/Matieres";
+
+// Tableaux de bord par rôle
+import DashboardEtudiant   from "../dashbord/DashboardEtudiant";
+import DashboardEnseignant from "../dashbord/DashboardEnseignant";
+import DashboardAdmin      from "../dashbord/DashboardAdmin";
+
+// ─── Clé sessionStorage ───────────────────────────────────────────────────────
+// On utilise sessionStorage (pas localStorage) pour que la page active
+// soit réinitialisée à chaque nouvelle session de navigateur, mais 
+// persiste lors d'un simple F5.
+const PAGE_KEY = "hensa_active_page";
 
 const Placeholder = ({ label }) => (
   <div className="flex items-center justify-center h-64 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-lg font-medium bg-white">
@@ -39,79 +55,106 @@ const pageLabels = {
   profil:             "Mon profil",
 };
 
-function renderPage(role, activePage, onNavigateToProfile) {
-  // ✅ PublicationsFeed reçoit le callback pour naviguer vers un profil
-  const feed = <PublicationsFeed onNavigateToProfile={onNavigateToProfile} />;
+// Pages valides par rôle — pour valider la page restaurée depuis sessionStorage
+const validPagesByRole = {
+  ETUDIANT:   ["dashboard","publications","emploi-du-temps","notes","cours","messagerie","notifications","annonces","matieres","profil"],
+  ENSEIGNANT: ["dashboard","cours","notes","emploi-du-temps","messagerie","notifications","annonces","profil"],
+  ADMIN:      ["dashboard","publications","messagerie","emploi-du-temps","notes","utilisateurs","filieres","annonces","notifications","matieres","annee-academique","cours","profil"],
+};
+
+function renderPage(role, activePage, onNavigateToProfile, onNavigate) {
+  const feed = <PublicationsFeed onNavigateToProfile={onNavigateToProfile}/>;
 
   if (role === "ETUDIANT") {
     switch (activePage) {
-      case "dashboard":        return <Placeholder label="Dashboard Étudiant" />;
-      case "profil":           return <Profil />;
-      case "publications":     return feed;
-      case "emploi-du-temps":  return <EmploiDuTemps />;
-      case "notes":            return <Notes />;
-      case "cours":            return <Placeholder label="Mes cours" />;
-      case "messagerie":       return <Messaging />;
-      case "notifications":    return <Notification />;
-      case "annonces":         return <Announcement />;
-      case "matieres":         return <Matiere />;
-      default:                 return <Placeholder label="Dashboard Étudiant" />;
+      case "dashboard":       return <DashboardEtudiant   onNavigate={onNavigate}/>;
+      case "profil":          return <Profil/>;
+      case "publications":    return feed;
+      case "emploi-du-temps": return <EmploiDuTemps/>;
+      case "notes":           return <Notes/>;
+      case "cours":           return <Placeholder label="Mes cours — à venir"/>;
+      case "messagerie":      return <Messaging/>;
+      case "notifications":   return <Notification/>;
+      case "annonces":        return <Announcement/>;
+      case "matieres":        return <Matiere/>;
+      default:                return <DashboardEtudiant   onNavigate={onNavigate}/>;
     }
   }
 
   if (role === "ENSEIGNANT") {
     switch (activePage) {
-      case "dashboard":        return <Placeholder label="Dashboard Enseignant" />;
-      case "profil":           return <Profil />;
-      case "cours":            return <Placeholder label="Mes cours" />;
-      case "notes":            return <Notes />;
-      case "emploi-du-temps":  return <EmploiDuTemps />;
-      case "messagerie":       return <Messaging />;
-      case "notifications":    return <Notification />;
-      case "annonces":         return <Announcement />;
-      default:                 return <Placeholder label="Dashboard Enseignant" />;
+      case "dashboard":       return <DashboardEnseignant onNavigate={onNavigate}/>;
+      case "profil":          return <Profil/>;
+      case "cours":           return <Placeholder label="Mes cours — à venir"/>;
+      case "notes":           return <Notes/>;
+      case "emploi-du-temps": return <EmploiDuTemps/>;
+      case "messagerie":      return <Messaging/>;
+      case "notifications":   return <Notification/>;
+      case "annonces":        return <Announcement/>;
+      default:                return <DashboardEnseignant onNavigate={onNavigate}/>;
     }
   }
 
   if (role === "ADMIN") {
     switch (activePage) {
-      case "dashboard":        return <Placeholder label="Dashboard Admin" />;
-      case "profil":           return <Profil />;
+      case "dashboard":        return <DashboardAdmin      onNavigate={onNavigate}/>;
+      case "profil":           return <Profil/>;
       case "publications":     return feed;
-      case "utilisateurs":     return <Users />;
-      case "filieres":         return <Filieres />;
-      case "cours":            return <Placeholder label="Cours" />;
-      case "emploi-du-temps":  return <EmploiDuTemps />;
-      case "statistiques":     return <Placeholder label="Statistiques" />;
-      case "documents":        return <Placeholder label="Documents" />;
-      case "annonces":         return <Announcement />;
-      case "messagerie":       return <Messaging />;
-      case "notifications":    return <Notification />;
-      case "annee-academique": return <AnneeAcademique />;
-      case "matieres":         return <Matiere />;
-      default:                 return <Placeholder label="Dashboard Admin" />;
+      case "utilisateurs":     return <Users/>;
+      case "filieres":         return <Filieres/>;
+      case "cours":            return <Placeholder label="Cours — à venir"/>;
+      case "emploi-du-temps":  return <EmploiDuTemps/>;
+      case "notes":            return <Notes/>;
+      case "statistiques":     return <Placeholder label="Statistiques — à venir"/>;
+      case "documents":        return <Placeholder label="Documents — à venir"/>;
+      case "annonces":         return <Announcement/>;
+      case "messagerie":       return <Messaging/>;
+      case "notifications":    return <Notification/>;
+      case "annee-academique": return <AnneeAcademique/>;
+      case "matieres":         return <Matiere/>;
+      default:                 return <DashboardAdmin      onNavigate={onNavigate}/>;
     }
   }
 
-  return <Placeholder label="Page introuvable" />;
+  return <Placeholder label="Page introuvable"/>;
 }
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [activePage, setActivePage]         = useState("dashboard");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // ✅ Navigation vers un profil public (depuis publications, commentaires...)
-  const [viewingUserId, setViewingUserId]   = useState(null);
+  // ── Restaurer la page active depuis sessionStorage ─────────────────────────
+  // Si la page sauvegardée est valide pour ce rôle → la restaurer
+  // Sinon → "dashboard"
+  const [activePage, setActivePage] = useState(() => {
+    // Lire directement depuis sessionStorage + localStorage au montage initial
+    try {
+      const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+      const saved      = sessionStorage.getItem(PAGE_KEY);
+      const valid      = validPagesByRole[storedUser?.role] || [];
+      return saved && valid.includes(saved) ? saved : "dashboard";
+    } catch { return "dashboard"; }
+  });
 
-  if (!user) return null;
+  const [sidebarCollapsed,  setSidebarCollapsed]  = useState(false);
+  const [mobileMenuOpen,    setMobileMenuOpen]    = useState(false);
+  const [viewingUserId,     setViewingUserId]     = useState(null);
 
+  // ── Persister la page active dans sessionStorage à chaque changement ───────
   const navigate = (page) => {
-    setViewingUserId(null); // fermer tout profil ouvert
+    setViewingUserId(null);
     setActivePage(page);
+    sessionStorage.setItem(PAGE_KEY, page);
     setMobileMenuOpen(false);
   };
+
+  // Effacer la page sauvegardée quand on navigue vers "dashboard" explicitement
+  // (comportement : F5 → garde la page, clic "dashboard" → force le dashboard)
+  useEffect(() => {
+    sessionStorage.setItem(PAGE_KEY, activePage);
+  }, [activePage]);
+
+  // Sécurité : si pas d'utilisateur (ne devrait pas arriver grâce à ProtectedRoute)
+  if (!user) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -127,41 +170,34 @@ export default function Dashboard() {
         activePage={activePage}
         onNavigate={navigate}
         collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onToggle={() => setSidebarCollapsed(v => !v)}
         mobileOpen={mobileMenuOpen}
       />
 
       <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarCollapsed ? "lg:ml-16" : "lg:ml-64"} min-w-0`}>
         <DashboardHeader
-          title={
-            viewingUserId
-              ? "Profil utilisateur"
-              : (pageLabels[activePage] || "Tableau de bord")
-          }
-          onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
+          title={viewingUserId ? "Profil utilisateur" : (pageLabels[activePage] || "Tableau de bord")}
+          onMenuToggle={() => setMobileMenuOpen(v => !v)}
         />
 
         <main className="p-4 md:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
-
-            {/* ✅ Afficher le profil public si un userId est sélectionné */}
             {viewingUserId ? (
-              <UserProfil
-                userId={viewingUserId}
-                onBack={() => setViewingUserId(null)}
-              />
+              <UserProfil userId={viewingUserId} onBack={() => setViewingUserId(null)}/>
             ) : (
-              renderPage(user.role, activePage, (userId) => {
-                // Ne pas naviguer vers son propre profil via UserProfil
-                // mais vers la page Profil normale
-                if (Number(userId) === Number(user.id)) {
-                  setActivePage("profil");
-                } else {
-                  setViewingUserId(userId);
-                }
-              })
+              renderPage(
+                user.role,
+                activePage,
+                (userId) => {
+                  if (Number(userId) === Number(user.id)) {
+                    navigate("profil");
+                  } else {
+                    setViewingUserId(userId);
+                  }
+                },
+                navigate
+              )
             )}
-
           </div>
         </main>
       </div>

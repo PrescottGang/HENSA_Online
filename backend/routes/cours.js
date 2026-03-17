@@ -4,7 +4,7 @@ const router  = express.Router();
 const db      = require("../db");
 const jwt     = require("jsonwebtoken");
 
-// ─── Middleware Auth ──────────────────────────────────────────────────────────
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 const authenticate = (req, res, next) => {
   const h = req.headers.authorization;
   if (!h?.startsWith("Bearer ")) return res.status(401).json({ error: "Token manquant." });
@@ -21,7 +21,7 @@ const requireEnseignantOrAdmin = (req, res, next) => {
   next();
 };
 
-// ─── Helper : envoyer une notification ───────────────────────────────────────
+// ─── Helper notification ──────────────────────────────────────────────────────
 async function sendNotif(db, io, { userId, type = "cours", titre, message, lien, entiteId }) {
   try {
     const [r] = await db.query(
@@ -58,12 +58,12 @@ router.post("/salles", authenticate, requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /cours/classes
+// GET /cours/classes — groupées filière/niveau, année active
 router.get("/classes", authenticate, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT c.id, c.nom, c.filiere_id, c.niveau_id,
-              f.nom AS filiere_nom, n.nom AS niveau_nom, n.ordre,
+              f.nom AS filiere_nom, n.nom AS niveau_nom, n.ordre, n.cycle,
               aa.libelle AS annee_libelle, aa.id AS annee_id
        FROM classe c
        JOIN filiere f ON f.id = c.filiere_id
@@ -73,6 +73,29 @@ router.get("/classes", authenticate, async (req, res) => {
        ORDER BY f.nom, n.ordre`
     );
     res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /cours/filieres — liste des filières avec niveaux et classes actives
+router.get("/filieres", authenticate, async (req, res) => {
+  try {
+    const [filieres] = await db.query("SELECT * FROM filiere ORDER BY nom");
+    const [niveaux]  = await db.query("SELECT * FROM niveau ORDER BY ordre");
+    const [classes]  = await db.query(
+      `SELECT c.id, c.nom, c.filiere_id, c.niveau_id
+       FROM classe c
+       JOIN annee_academique aa ON aa.id = c.annee_academique_id
+       WHERE aa.statut = 'ACTIVE'`
+    );
+    // Construire arborescence filière → niveaux → classes
+    const tree = filieres.map(f => ({
+      ...f,
+      niveaux: niveaux.map(n => ({
+        ...n,
+        classes: classes.filter(c => c.filiere_id === f.id && c.niveau_id === n.id),
+      })).filter(n => n.classes.length > 0),
+    })).filter(f => f.niveaux.length > 0);
+    res.json(tree);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -90,7 +113,7 @@ router.get("/enseignants", authenticate, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /cours/semestres?classe_id=X  → semestres liés au niveau de cette classe
+// GET /cours/semestres?classe_id=X
 router.get("/semestres", authenticate, async (req, res) => {
   const { classe_id } = req.query;
   try {
@@ -99,8 +122,7 @@ router.get("/semestres", authenticate, async (req, res) => {
       [rows] = await db.query(
         `SELECT sm.* FROM semestre sm
          JOIN classe c ON c.niveau_id = sm.niveau_id
-         WHERE c.id = ?
-         ORDER BY sm.numero`,
+         WHERE c.id = ? ORDER BY sm.numero`,
         [classe_id]
       );
     } else {
@@ -119,28 +141,24 @@ router.get("/matieres", authenticate, async (req, res) => {
              ue.intitule AS ue_nom, ue.id AS ue_id,
              sm.libelle AS semestre_libelle, sm.id AS semestre_id
       FROM matiere m
-      JOIN ue       ON ue.id  = m.ue_id
+      JOIN ue ON ue.id = m.ue_id
       JOIN semestre sm ON sm.id = ue.semestre_id
-      JOIN niveau   n  ON n.id  = sm.niveau_id
+      JOIN niveau n ON n.id = sm.niveau_id
     `;
-    const params = [];
-    const where  = [];
-
+    const params = [], where = [];
     if (classe_id) {
       query += " JOIN classe c ON c.niveau_id = n.id AND c.filiere_id = ue.filiere_id";
-      where.push("c.id = ?");
-      params.push(classe_id);
+      where.push("c.id = ?"); params.push(classe_id);
     }
     if (semestre_id) { where.push("sm.id = ?"); params.push(semestre_id); }
     if (where.length) query += " WHERE " + where.join(" AND ");
     query += " ORDER BY sm.numero, ue.ordre, m.nom";
-
     const [rows] = await db.query(query, params);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /cours/cours-list?classe_id=X  → table cours (ancienne)
+// GET /cours/cours-list?classe_id=X
 router.get("/cours-list", authenticate, async (req, res) => {
   const { classe_id } = req.query;
   try {
@@ -152,43 +170,61 @@ router.get("/cours-list", authenticate, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /cours/cours-list-create
+router.post("/cours-list-create", authenticate, requireAdmin, async (req, res) => {
+  const { nom, classe_id, semestre_id } = req.body;
+  if (!nom || !classe_id) return res.status(400).json({ error: "nom, classe_id requis." });
+  try {
+    // Utiliser semestre_id si fourni, sinon prendre le 1er semestre du niveau
+    let semId = semestre_id;
+    if (!semId) {
+      const [[sm]] = await db.query(
+        `SELECT sm.id FROM semestre sm JOIN classe c ON c.niveau_id=sm.niveau_id
+         WHERE c.id=? ORDER BY sm.numero LIMIT 1`, [classe_id]
+      );
+      semId = sm?.id || 1;
+    }
+    const [r] = await db.query(
+      "INSERT INTO cours (nom, classe_id, semestre_id) VALUES (?,?,?)",
+      [nom, classe_id, semId]
+    );
+    const [[row]] = await db.query("SELECT * FROM cours WHERE id=?", [r.insertId]);
+    res.status(201).json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
-// SEMAINES
+// SEMAINES — semestre_id OPTIONNEL
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET /cours/semaines?semestre_id=X
 router.get("/semaines", authenticate, async (req, res) => {
   const { semestre_id } = req.query;
   try {
-    const where  = semestre_id ? "WHERE semestre_id=?" : "";
+    const where  = semestre_id ? "WHERE sw.semestre_id=?" : "";
     const params = semestre_id ? [semestre_id] : [];
     const [rows] = await db.query(
       `SELECT sw.*, sm.libelle AS semestre_libelle
-       FROM semaine sw
-       JOIN semestre sm ON sm.id = sw.semestre_id
-       ${where}
-       ORDER BY sw.date_debut DESC`,
+       FROM semaine sw LEFT JOIN semestre sm ON sm.id=sw.semestre_id
+       ${where} ORDER BY sw.date_debut DESC`,
       params
     );
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /cours/semaines
 router.post("/semaines", authenticate, requireAdmin, async (req, res) => {
   const { date_debut, date_fin, semestre_id } = req.body;
   if (!date_debut || !date_fin || !semestre_id)
-    return res.status(400).json({ error: "date_debut, date_fin, semestre_id requis." });
+    return res.status(400).json({ error: "date_debut, date_fin et semestre_id requis." });
   try {
     const [r] = await db.query(
       "INSERT INTO semaine (date_debut, date_fin, semestre_id) VALUES (?,?,?)",
-      [date_debut, date_fin, semestre_id]
+      [date_debut, date_fin, semestre_id || null]
     );
     const [[row]] = await db.query(
       `SELECT sw.*, sm.libelle AS semestre_libelle
-       FROM semaine sw JOIN semestre sm ON sm.id = sw.semestre_id
-       WHERE sw.id=?`,
-      [r.insertId]
+       FROM semaine sw LEFT JOIN semestre sm ON sm.id=sw.semestre_id
+       WHERE sw.id=?`, [r.insertId]
     );
     res.status(201).json(row);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -203,58 +239,56 @@ router.delete("/semaines/:id", authenticate, requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SÉANCES (EMPLOI DU TEMPS)
+// SÉANCES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET /cours/seances?semaine_id=X [&classe_id=Y] [&enseignant_id=Z]
+// Requête SELECT séances complète (réutilisée)
+const SEANCE_SELECT = `
+  SELECT s.*,
+         u.prenom AS enseignant_prenom, u.nom AS enseignant_nom, u.photo AS enseignant_photo,
+         sl.nom   AS salle_nom,      sl.capacite AS salle_capacite,
+         cl.id    AS classe_id,      cl.nom AS classe_nom,
+         cl.filiere_id, cl.niveau_id,
+         co.nom   AS cours_nom,
+         m.id     AS matiere_id,  m.nom AS matiere_nom, m.code AS matiere_code, m.coefficient,
+         sm.id    AS semestre_id, sm.libelle AS semestre_libelle,
+         f.nom    AS filiere_nom, n.nom AS niveau_nom
+  FROM seance s
+  JOIN utilisateur u  ON u.id  = s.enseignant_id
+  JOIN salle       sl ON sl.id = s.salle_id
+  JOIN classe      cl ON cl.id = s.classe_id
+  JOIN filiere     f  ON f.id  = cl.filiere_id
+  JOIN niveau      n  ON n.id  = cl.niveau_id
+  JOIN cours       co ON co.id = s.cours_id
+  LEFT JOIN matiere m  ON m.id  = s.matiere_id
+  JOIN semaine     sw ON sw.id  = s.semaine_id
+  LEFT JOIN semestre sm ON sm.id = sw.semestre_id
+`;
+
+// GET /cours/seances
 router.get("/seances", authenticate, async (req, res) => {
-  const { semaine_id, enseignant_id, classe_id } = req.query;
+  const { semaine_id, enseignant_id, classe_id, filiere_id, niveau_id } = req.query;
   try {
-    const where  = [];
-    const params = [];
+    const w = [], p = [];
+    if (semaine_id)    { w.push("s.semaine_id=?");    p.push(semaine_id); }
+    if (enseignant_id) { w.push("s.enseignant_id=?"); p.push(enseignant_id); }
+    if (classe_id)     { w.push("s.classe_id=?");     p.push(classe_id); }
+    if (filiere_id)    { w.push("cl.filiere_id=?");   p.push(filiere_id); }
+    if (niveau_id)     { w.push("cl.niveau_id=?");    p.push(niveau_id); }
 
-    if (semaine_id)    { where.push("s.semaine_id=?");    params.push(semaine_id); }
-    if (enseignant_id) { where.push("s.enseignant_id=?"); params.push(enseignant_id); }
-    if (classe_id)     { where.push("s.classe_id=?");     params.push(classe_id); }
-
-    // Étudiant → sa classe seulement
+    // ETUDIANT → sa classe automatiquement
     if (req.user.role === "ETUDIANT") {
-      const [[etud]] = await db.query(
-        "SELECT classe_id FROM etudiant WHERE id=?", [req.user.id]
-      );
-      if (etud) { where.push("s.classe_id=?"); params.push(etud.classe_id); }
+      const [[etud]] = await db.query("SELECT classe_id FROM etudiant WHERE id=?", [req.user.id]);
+      if (etud) { w.push("s.classe_id=?"); p.push(etud.classe_id); }
     }
-    // Enseignant → ses séances seulement
+    // ENSEIGNANT → ses séances automatiquement
     if (req.user.role === "ENSEIGNANT") {
-      where.push("s.enseignant_id=?");
-      params.push(req.user.id);
+      w.push("s.enseignant_id=?"); p.push(req.user.id);
     }
 
-    const whereSQL = where.length ? "WHERE " + where.join(" AND ") : "";
-
+    const whereSQL = w.length ? "WHERE " + w.join(" AND ") : "";
     const [rows] = await db.query(
-      `SELECT s.*,
-              u.prenom AS enseignant_prenom, u.nom AS enseignant_nom,
-              u.photo  AS enseignant_photo,
-              sl.nom   AS salle_nom,      sl.capacite AS salle_capacite,
-              cl.nom   AS classe_nom,
-              co.nom   AS cours_nom,
-              m.id     AS matiere_id,     m.nom AS matiere_nom,
-              m.code   AS matiere_code,   m.coefficient,
-              sm.id    AS semestre_id,    sm.libelle AS semestre_libelle,
-              f.nom    AS filiere_nom
-       FROM seance s
-       JOIN utilisateur u  ON u.id  = s.enseignant_id
-       JOIN salle       sl ON sl.id = s.salle_id
-       JOIN classe      cl ON cl.id = s.classe_id
-       JOIN cours       co ON co.id = s.cours_id
-       JOIN filiere     f  ON f.id  = cl.filiere_id
-       LEFT JOIN matiere m  ON m.id  = s.matiere_id
-       JOIN semaine     sw ON sw.id  = s.semaine_id
-       JOIN semestre    sm ON sm.id  = sw.semestre_id
-       ${whereSQL}
-       ORDER BY s.date ASC, s.heure_debut ASC`,
-      params
+      `${SEANCE_SELECT} ${whereSQL} ORDER BY s.date ASC, s.heure_debut ASC`, p
     );
     res.json(rows);
   } catch (e) {
@@ -263,126 +297,147 @@ router.get("/seances", authenticate, async (req, res) => {
   }
 });
 
-// POST /cours/seances — programmer une séance (Admin)
+// POST /cours/seances — créer une ou plusieurs séances (multi-jours)
+// body: { dates: ["2026-03-16","2026-03-17",...], heure_debut, heure_fin,
+//         semaine_id, cours_id, matiere_id, enseignant_id, salle_id, classe_id, type_cours }
 router.post("/seances", authenticate, requireAdmin, async (req, res) => {
   const {
-    date, heure_debut, heure_fin,
+    dates, heure_debut, heure_fin,
     semaine_id, cours_id, matiere_id,
     enseignant_id, salle_id, classe_id,
     type_cours = "CM"
   } = req.body;
 
-  if (!date||!heure_debut||!heure_fin||!semaine_id||!cours_id||!enseignant_id||!salle_id||!classe_id)
+  if (!dates?.length||!heure_debut||!heure_fin||!semaine_id||!cours_id||!enseignant_id||!salle_id||!classe_id)
     return res.status(400).json({ error: "Tous les champs obligatoires requis." });
 
-  try {
-    // Conflit salle
-    const [cSalle] = await db.query(
-      `SELECT id FROM seance
-       WHERE salle_id=? AND date=? AND statut='PLANIFIEE'
-         AND NOT (heure_fin <= ? OR heure_debut >= ?)`,
-      [salle_id, date, heure_debut, heure_fin]
-    );
-    if (cSalle.length)
-      return res.status(409).json({ error: "Conflit : cette salle est déjà occupée sur ce créneau." });
+  const created = [];
+  const errors  = [];
 
-    // Conflit enseignant
-    const [cEns] = await db.query(
-      `SELECT id FROM seance
-       WHERE enseignant_id=? AND date=? AND statut='PLANIFIEE'
-         AND NOT (heure_fin <= ? OR heure_debut >= ?)`,
-      [enseignant_id, date, heure_debut, heure_fin]
-    );
-    if (cEns.length)
-      return res.status(409).json({ error: "Conflit : cet enseignant est déjà planifié sur ce créneau." });
+  for (const date of dates) {
+    try {
+      // Conflit salle
+      const [cSalle] = await db.query(
+        `SELECT id FROM seance WHERE salle_id=? AND date=? AND statut='PLANIFIEE'
+         AND NOT (heure_fin<=? OR heure_debut>=?)`,
+        [salle_id, date, heure_debut, heure_fin]
+      );
+      if (cSalle.length) { errors.push(`${date}: salle déjà occupée.`); continue; }
 
-    const [r] = await db.query(
-      `INSERT INTO seance
-         (date, heure_debut, heure_fin, semaine_id, cours_id, matiere_id,
-          enseignant_id, salle_id, classe_id, type_cours)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [date, heure_debut, heure_fin, semaine_id, cours_id,
-       matiere_id || null, enseignant_id, salle_id, classe_id, type_cours]
-    );
+      // Conflit enseignant
+      const [cEns] = await db.query(
+        `SELECT id FROM seance WHERE enseignant_id=? AND date=? AND statut='PLANIFIEE'
+         AND NOT (heure_fin<=? OR heure_debut>=?)`,
+        [enseignant_id, date, heure_debut, heure_fin]
+      );
+      if (cEns.length) { errors.push(`${date}: enseignant déjà planifié.`); continue; }
 
-    // Séance complète
-    const [[seance]] = await db.query(
-      `SELECT s.*,
-              u.prenom AS enseignant_prenom, u.nom AS enseignant_nom,
-              sl.nom AS salle_nom, cl.nom AS classe_nom,
-              co.nom AS cours_nom, m.nom AS matiere_nom, m.code AS matiere_code
-       FROM seance s
-       JOIN utilisateur u ON u.id=s.enseignant_id
-       JOIN salle sl ON sl.id=s.salle_id
-       JOIN classe cl ON cl.id=s.classe_id
-       JOIN cours  co ON co.id=s.cours_id
-       LEFT JOIN matiere m ON m.id=s.matiere_id
-       WHERE s.id=?`, [r.insertId]
-    );
+      const [r] = await db.query(
+        `INSERT INTO seance (date,heure_debut,heure_fin,semaine_id,cours_id,matiere_id,
+          enseignant_id,salle_id,classe_id,type_cours)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [date, heure_debut, heure_fin, semaine_id, cours_id,
+         matiere_id||null, enseignant_id, salle_id, classe_id, type_cours]
+      );
 
-    // Notif enseignant
-    const io = req.app.get("io");
-    const dateLabel = new Date(date).toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long" });
-    await sendNotif(db, io, {
-      userId:   enseignant_id,
-      type:     "cours",
-      titre:    `📅 Nouveau cours programmé`,
-      message:  `${seance.matiere_nom || seance.cours_nom} — ${dateLabel} ${heure_debut.slice(0,5)}→${heure_fin.slice(0,5)} | ${seance.salle_nom} | ${seance.classe_nom}`,
-      lien:     "/emploi-du-temps",
-      entiteId: r.insertId,
-    });
-
-    res.status(201).json(seance);
-  } catch (e) {
-    console.error("POST /seances:", e.message);
-    res.status(500).json({ error: e.message });
+      const [[seance]] = await db.query(
+        `${SEANCE_SELECT} WHERE s.id=?`, [r.insertId]
+      );
+      created.push(seance);
+    } catch (e) { errors.push(`${date}: ${e.message}`); }
   }
+
+  if (!created.length)
+    return res.status(409).json({ error: errors.join(" | ") });
+
+  // Notifier l'enseignant (1 notif groupée)
+  const io = req.app.get("io");
+  const matLabel  = created[0].matiere_nom || created[0].cours_nom;
+  const datesStr  = created.map(s =>
+    new Date(s.date).toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})
+  ).join(", ");
+  await sendNotif(db, io, {
+    userId:   enseignant_id,
+    type:     "cours",
+    titre:    `📅 Cours programmé — ${matLabel}`,
+    message:  `${datesStr} | ${heure_debut.slice(0,5)}→${heure_fin.slice(0,5)} | ${created[0].salle_nom} | ${created[0].classe_nom}`,
+    lien:     "/emploi-du-temps",
+    entiteId: created[0].id,
+  });
+
+  // Notifier les étudiants de la classe
+  const [etudiants] = await db.query(
+    `SELECT u.id FROM utilisateur u JOIN etudiant e ON e.id=u.id
+     WHERE e.classe_id=? AND u.statut='ACTIF'`, [classe_id]
+  );
+  for (const etud of etudiants) {
+    await sendNotif(db, io, {
+      userId:   etud.id,
+      type:     "cours",
+      titre:    `📚 Nouveau cours — ${matLabel}`,
+      message:  `${datesStr} | ${heure_debut.slice(0,5)}→${heure_fin.slice(0,5)} | ${created[0].salle_nom}`,
+      lien:     "/emploi-du-temps",
+      entiteId: created[0].id,
+    });
+  }
+
+  res.status(201).json({ created, errors });
 });
 
-// PATCH /cours/seances/:id — modifier / annuler
+// PATCH /cours/seances/:id
 router.patch("/seances/:id", authenticate, requireAdmin, async (req, res) => {
   const { statut, heure_debut, heure_fin, salle_id, enseignant_id, matiere_id, type_cours } = req.body;
   try {
     const fields = [], vals = [];
-    if (statut)       { fields.push("statut=?");       vals.push(statut); }
-    if (heure_debut)  { fields.push("heure_debut=?");  vals.push(heure_debut); }
-    if (heure_fin)    { fields.push("heure_fin=?");    vals.push(heure_fin); }
-    if (salle_id)     { fields.push("salle_id=?");     vals.push(salle_id); }
-    if (enseignant_id){ fields.push("enseignant_id=?");vals.push(enseignant_id); }
-    if (type_cours)   { fields.push("type_cours=?");   vals.push(type_cours); }
+    if (statut)       { fields.push("statut=?");        vals.push(statut); }
+    if (heure_debut)  { fields.push("heure_debut=?");   vals.push(heure_debut); }
+    if (heure_fin)    { fields.push("heure_fin=?");     vals.push(heure_fin); }
+    if (salle_id)     { fields.push("salle_id=?");      vals.push(salle_id); }
+    if (enseignant_id){ fields.push("enseignant_id=?"); vals.push(enseignant_id); }
+    if (type_cours)   { fields.push("type_cours=?");    vals.push(type_cours); }
     if (matiere_id !== undefined) { fields.push("matiere_id=?"); vals.push(matiere_id); }
     if (!fields.length) return res.status(400).json({ error: "Aucun champ." });
 
     vals.push(req.params.id);
     await db.query(`UPDATE seance SET ${fields.join(",")} WHERE id=?`, vals);
 
-    // Notif annulation
     if (statut === "ANNULEE") {
       const [[s]] = await db.query(
-        `SELECT s.enseignant_id, s.date, s.heure_debut, co.nom AS cours_nom, m.nom AS matiere_nom
-         FROM seance s
-         JOIN cours co ON co.id=s.cours_id
-         LEFT JOIN matiere m ON m.id=s.matiere_id
-         WHERE s.id=?`, [req.params.id]
+        `SELECT s.enseignant_id, s.date, s.heure_debut, s.classe_id,
+                co.nom AS cours_nom, m.nom AS matiere_nom
+         FROM seance s JOIN cours co ON co.id=s.cours_id
+         LEFT JOIN matiere m ON m.id=s.matiere_id WHERE s.id=?`, [req.params.id]
       );
       if (s) {
-        const io = req.app.get("io");
-        const label = new Date(s.date).toLocaleDateString("fr-FR");
+        const io  = req.app.get("io");
+        const lab = s.matiere_nom || s.cours_nom;
+        const dat = new Date(s.date).toLocaleDateString("fr-FR");
+        // Notif enseignant
         await sendNotif(db, io, {
-          userId:   s.enseignant_id,
-          type:     "cours",
-          titre:    `❌ Cours annulé`,
-          message:  `${s.matiere_nom||s.cours_nom} du ${label} à ${s.heure_debut.slice(0,5)} a été annulé.`,
-          lien:     "/emploi-du-temps",
-          entiteId: parseInt(req.params.id),
+          userId:   s.enseignant_id, type: "cours",
+          titre:    `❌ Cours annulé — ${lab}`,
+          message:  `Le ${dat} à ${s.heure_debut.slice(0,5)} a été annulé.`,
+          lien: "/emploi-du-temps", entiteId: parseInt(req.params.id),
         });
+        // Notif étudiants
+        const [etuds] = await db.query(
+          `SELECT u.id FROM utilisateur u JOIN etudiant e ON e.id=u.id
+           WHERE e.classe_id=? AND u.statut='ACTIF'`, [s.classe_id]
+        );
+        for (const etud of etuds) {
+          await sendNotif(db, io, {
+            userId: etud.id, type: "cours",
+            titre:  `❌ Cours annulé — ${lab}`,
+            message: `Le ${dat} à ${s.heure_debut.slice(0,5)} a été annulé.`,
+            lien: "/emploi-du-temps", entiteId: parseInt(req.params.id),
+          });
+        }
       }
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// DELETE /cours/seances/:id
 router.delete("/seances/:id", authenticate, requireAdmin, async (req, res) => {
   try {
     await db.query("DELETE FROM seance WHERE id=?", [req.params.id]);
@@ -391,28 +446,27 @@ router.delete("/seances/:id", authenticate, requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MES MATIÈRES (enseignant) — matières qu'il dispense via ses séances
+// MES MATIÈRES (enseignant)
 // ══════════════════════════════════════════════════════════════════════════════
 router.get("/mes-matieres", authenticate, requireEnseignantOrAdmin, async (req, res) => {
   const ensId = req.user.role === "ENSEIGNANT" ? req.user.id : req.query.enseignant_id;
   try {
     const [rows] = await db.query(
       `SELECT DISTINCT
-              m.id AS matiere_id, m.nom AS matiere_nom, m.code AS matiere_code,
-              m.coefficient,
-              cl.id AS classe_id,  cl.nom AS classe_nom,
-              f.nom AS filiere_nom, n.nom  AS niveau_nom,
-              sm.id AS semestre_id, sm.libelle AS semestre_libelle,
-              aa.id AS annee_id,   aa.libelle  AS annee_libelle
+              m.id AS matiere_id, m.nom AS matiere_nom, m.code AS matiere_code, m.coefficient,
+              cl.id AS classe_id, cl.nom AS classe_nom,
+              f.nom AS filiere_nom,  n.nom AS niveau_nom,
+              sm.id AS semestre_id,  sm.libelle AS semestre_libelle,
+              aa.id AS annee_id,     aa.libelle AS annee_libelle
        FROM seance s
        JOIN matiere  m  ON m.id  = s.matiere_id
        JOIN classe   cl ON cl.id = s.classe_id
        JOIN filiere  f  ON f.id  = cl.filiere_id
        JOIN niveau   n  ON n.id  = cl.niveau_id
        JOIN semaine  sw ON sw.id = s.semaine_id
-       JOIN semestre sm ON sm.id = sw.semestre_id
+       LEFT JOIN semestre sm ON sm.id = sw.semestre_id
        JOIN annee_academique aa ON aa.id = cl.annee_academique_id
-       WHERE s.enseignant_id = ? AND s.matiere_id IS NOT NULL
+       WHERE s.enseignant_id=? AND s.matiere_id IS NOT NULL
        ORDER BY cl.nom, m.nom`,
       [ensId]
     );
@@ -429,122 +483,124 @@ router.get("/notes", authenticate, requireEnseignantOrAdmin, async (req, res) =>
   const { matiere_id, classe_id, semestre_id } = req.query;
   if (!matiere_id||!classe_id||!semestre_id)
     return res.status(400).json({ error: "matiere_id, classe_id, semestre_id requis." });
-
   try {
-    // Année active
-    const [[aa]] = await db.query(
-      "SELECT id FROM annee_academique WHERE statut='ACTIVE' LIMIT 1"
-    );
+    const [[aa]] = await db.query("SELECT id FROM annee_academique WHERE statut='ACTIVE' LIMIT 1");
     const anneeId = aa?.id;
     if (!anneeId) return res.status(400).json({ error: "Aucune année académique active." });
 
-    // Étudiants de la classe
     const [etudiants] = await db.query(
       `SELECT u.id, u.prenom, u.nom, u.photo AS photo_profil, e.matricule
-       FROM utilisateur u
-       JOIN etudiant e ON e.id = u.id
-       WHERE e.classe_id = ?
-       ORDER BY u.nom, u.prenom`,
-      [classe_id]
+       FROM utilisateur u JOIN etudiant e ON e.id=u.id
+       WHERE e.classe_id=? ORDER BY u.nom, u.prenom`, [classe_id]
     );
-
     if (!etudiants.length) return res.json({ etudiants: [], annee_id: anneeId });
 
-    // Notes existantes
     const [notes] = await db.query(
       `SELECT * FROM note
        WHERE matiere_id=? AND semestre_id=? AND annee_id=?
          AND etudiant_id IN (${etudiants.map(()=>"?").join(",")})`,
       [matiere_id, semestre_id, anneeId, ...etudiants.map(e=>e.id)]
     );
-
     const noteMap = {};
     notes.forEach(n => { noteMap[n.etudiant_id] = n; });
 
     const result = etudiants.map(e => ({
       ...e,
-      note_id: noteMap[e.id]?.id    ?? null,
-      cc:      noteMap[e.id]?.cc    ?? null,
-      ef:      noteMap[e.id]?.ef    ?? null,
-      // Calcul JS (40% CC + 60% EF)
+      note_id: noteMap[e.id]?.id ?? null,
+      cc:      noteMap[e.id]?.cc ?? null,
+      ef:      noteMap[e.id]?.ef ?? null,
       moyenne: noteMap[e.id]?.cc != null && noteMap[e.id]?.ef != null
-               ? Math.round((noteMap[e.id].cc * 0.4 + noteMap[e.id].ef * 0.6) * 100) / 100
-               : null,
+               ? Math.round((noteMap[e.id].cc*0.4 + noteMap[e.id].ef*0.6)*100)/100 : null,
     }));
-
     res.json({ etudiants: result, annee_id: anneeId });
-  } catch (e) {
-    console.error("GET /notes:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /cours/notes — enregistrer/mettre à jour les notes en bulk
+// POST /cours/notes — bulk
 router.post("/notes", authenticate, requireEnseignantOrAdmin, async (req, res) => {
   const { notes } = req.body;
   if (!Array.isArray(notes)||!notes.length)
     return res.status(400).json({ error: "notes[] requis." });
-
   try {
     for (const n of notes) {
       const { etudiant_id, matiere_id, semestre_id, annee_id, cc, ef } = n;
       if (!etudiant_id||!matiere_id||!semestre_id||!annee_id) continue;
       await db.query(
-        `INSERT INTO note (etudiant_id, matiere_id, semestre_id, annee_id, cc, ef)
+        `INSERT INTO note (etudiant_id,matiere_id,semestre_id,annee_id,cc,ef)
          VALUES (?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE
-           cc = CASE WHEN VALUES(cc) IS NOT NULL THEN VALUES(cc) ELSE cc END,
-           ef = CASE WHEN VALUES(ef) IS NOT NULL THEN VALUES(ef) ELSE ef END`,
-        [etudiant_id, matiere_id, semestre_id, annee_id,
-         cc ?? null, ef ?? null]
+           cc=CASE WHEN VALUES(cc) IS NOT NULL THEN VALUES(cc) ELSE cc END,
+           ef=CASE WHEN VALUES(ef) IS NOT NULL THEN VALUES(ef) ELSE ef END`,
+        [etudiant_id, matiere_id, semestre_id, annee_id, cc??null, ef??null]
       );
     }
     res.json({ ok: true, count: notes.length });
-  } catch (e) {
-    console.error("POST /notes:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /cours/notes/etudiant — notes de l'étudiant connecté
+// GET /cours/notes/etudiant — notes de l'étudiant connecté ou ?etudiant_id=X (admin)
 router.get("/notes/etudiant", authenticate, async (req, res) => {
-  const etudId = req.user.role === "ETUDIANT" ? req.user.id : req.query.etudiant_id;
+  // Etudiant voit ses propres notes ; Admin peut voir celles d'un autre
+  const etudId = req.user.role === "ETUDIANT"
+    ? req.user.id
+    : req.query.etudiant_id;
+  if (!etudId) return res.status(400).json({ error: "etudiant_id requis." });
   try {
     const [notes] = await db.query(
       `SELECT n.*,
               m.nom AS matiere_nom, m.code AS matiere_code, m.coefficient,
               ue.intitule AS ue_nom,
-              sm.libelle  AS semestre_libelle, sm.numero,
-              aa.libelle  AS annee_libelle,
-              CASE WHEN n.cc IS NOT NULL AND n.ef IS NOT NULL
-                   THEN ROUND(n.cc*0.4 + n.ef*0.6, 2)
-                   ELSE NULL END AS moyenne
+              sm.libelle AS semestre_libelle, sm.numero,
+              aa.libelle AS annee_libelle,
+              ROUND(CASE WHEN n.cc IS NOT NULL AND n.ef IS NOT NULL
+                    THEN n.cc*0.4+n.ef*0.6 ELSE NULL END, 2) AS moyenne
        FROM note n
        JOIN matiere  m  ON m.id  = n.matiere_id
        JOIN ue          ON ue.id = m.ue_id
        JOIN semestre sm  ON sm.id = n.semestre_id
        JOIN annee_academique aa ON aa.id = n.annee_id
        WHERE n.etudiant_id=?
-       ORDER BY sm.numero, ue.ordre, m.nom`,
-      [etudId]
+       ORDER BY sm.numero, ue.ordre, m.nom`, [etudId]
     );
     res.json(notes);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-
-// POST /cours/cours-list-create — créer un cours générique (utilisé par le frontend)
-router.post("/cours-list-create", authenticate, requireAdmin, async (req, res) => {
-  const { nom, classe_id, semestre_id } = req.body;
-  if (!nom || !classe_id || !semestre_id)
-    return res.status(400).json({ error: "nom, classe_id, semestre_id requis." });
+// GET /cours/notes/all — toutes les notes (admin) avec filtres optionnels
+router.get("/notes/all", authenticate, requireAdmin, async (req, res) => {
+  const { classe_id, matiere_id, semestre_id, annee_id } = req.query;
   try {
-    const [r] = await db.query(
-      "INSERT INTO cours (nom, classe_id, semestre_id) VALUES (?,?,?)",
-      [nom, classe_id, semestre_id]
+    const w = [], p = [];
+    if (classe_id)   { w.push("e.classe_id=?");  p.push(classe_id); }
+    if (matiere_id)  { w.push("n.matiere_id=?"); p.push(matiere_id); }
+    if (semestre_id) { w.push("n.semestre_id=?");p.push(semestre_id); }
+    if (annee_id)    { w.push("n.annee_id=?");   p.push(annee_id); }
+
+    const [rows] = await db.query(
+      `SELECT n.*,
+              u.prenom, u.nom, u.photo AS photo_profil, et.matricule,
+              m.nom AS matiere_nom, m.code AS matiere_code, m.coefficient,
+              ue.intitule AS ue_nom,
+              sm.libelle AS semestre_libelle, sm.numero,
+              aa.libelle AS annee_libelle,
+              cl.nom AS classe_nom, f.nom AS filiere_nom, nv.nom AS niveau_nom,
+              ROUND(CASE WHEN n.cc IS NOT NULL AND n.ef IS NOT NULL
+                    THEN n.cc*0.4+n.ef*0.6 ELSE NULL END, 2) AS moyenne
+       FROM note n
+       JOIN utilisateur u ON u.id = n.etudiant_id
+       JOIN etudiant    et ON et.id = n.etudiant_id
+       JOIN classe      cl ON cl.id = et.classe_id
+       JOIN filiere     f  ON f.id  = cl.filiere_id
+       JOIN niveau      nv ON nv.id = cl.niveau_id
+       JOIN matiere     m  ON m.id  = n.matiere_id
+       JOIN ue             ON ue.id = m.ue_id
+       JOIN semestre    sm ON sm.id = n.semestre_id
+       JOIN annee_academique aa ON aa.id = n.annee_id
+       ${w.length ? "WHERE "+w.join(" AND ") : ""}
+       ORDER BY cl.nom, u.nom, u.prenom, sm.numero, m.nom`,
+      p
     );
-    const [[row]] = await db.query("SELECT * FROM cours WHERE id=?", [r.insertId]);
-    res.status(201).json(row);
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
