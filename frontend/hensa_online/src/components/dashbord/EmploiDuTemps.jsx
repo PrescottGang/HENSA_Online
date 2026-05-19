@@ -6,6 +6,7 @@ import {
   ChevronDown, GraduationCap, Layers
 } from "lucide-react";
 import axios from "axios";
+import { useSocket } from "../hooks/useSocket";
 
 const API      = "http://localhost:5000/api";
 const BASE_URL = "http://localhost:5000";
@@ -218,8 +219,8 @@ function ModalSeance({ semaine, onClose, onSaved, data }) {
         const classeInfo = classes.find(c => String(c.id) === String(form.classe_id));
         const cr = await api.post("/cours/cours-list-create", {
           nom: classeInfo?.nom || "Cours",
-          classe_id: form.classe_id,
-          semestre_id: form.semestre_id || 1,
+          classe_id:   form.classe_id,
+          semestre_id: form.semestre_id || null,
         });
         cours_id = cr.data.id;
       }
@@ -235,13 +236,16 @@ function ModalSeance({ semaine, onClose, onSaved, data }) {
         });
       } else {
         const r = await api.post("/cours/seances", {
-          ...form,
+          dates:         selectedDates,
+          heure_debut:   form.heure_debut + ":00",
+          heure_fin:     form.heure_fin   + ":00",
+          semaine_id:    semaine.id,
           cours_id,
-          dates:       selectedDates,
-          heure_debut: form.heure_debut+":00",
-          heure_fin:   form.heure_fin+":00",
-          semaine_id:  semaine.id,
-          matiere_id:  form.matiere_id || null,
+          matiere_id:    form.matiere_id   || null,
+          enseignant_id: form.enseignant_id,
+          salle_id:      form.salle_id,
+          classe_id:     form.classe_id,
+          type_cours:    form.type_cours,
         });
         if (r.data.errors?.length) {
           if (r.data.created?.length) {
@@ -408,12 +412,12 @@ export default function EmploiDuTemps() {
   const [editSeance,  setEditSeance]  = useState(null);
   const [toast,       setToast]       = useState(null);
   const [showAddSem,  setShowAddSem]  = useState(false);
-  const [newSem,      setNewSem]      = useState({ date_debut:"", date_fin:"", semestre_id:"" });
+  const [newSem,      setNewSem]      = useState({ date_debut:"", date_fin:"" });
   const [autoClass,   setAutoClass]   = useState(null); // classe auto pour enseignant/étudiant
-  const [semestresRef, setSemestresRef] = useState([]); // tous les semestres pour le modal semaine
 
-  const semaine  = semaines[semaineIdx] || null;
-  const showToast = (msg, type="success") => setToast({ msg, type });
+  const semaine   = semaines[semaineIdx] || null;
+  const showToast  = (msg, type="success") => setToast({ msg, type });
+  const socket     = useSocket();
 
   // Dériver niveaux et classes disponibles depuis l'arborescence
   const currentFiliere  = filieres.find(f => String(f.id) === String(filiereId));
@@ -424,9 +428,19 @@ export default function EmploiDuTemps() {
   // Chargement initial
   useEffect(() => {
     // Toutes les semaines sans filtre
-    api.get("/cours/semaines").then(r => { setSemaines(r.data); setSemaineIdx(0); });
-    // Tous les semestres pour le modal de création de semaine
-    api.get("/cours/semestres").then(r => setSemestresRef(r.data));
+    api.get("/cours/semaines").then(r => {
+      const rows = r.data || [];
+      setSemaines(rows);
+      // ✅ Sélectionner automatiquement la semaine en cours (ou la plus proche)
+      const today = new Date(); today.setHours(0,0,0,0);
+      let bestIdx = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const debut = new Date(rows[i].date_debut); debut.setHours(0,0,0,0);
+        const fin   = new Date(rows[i].date_fin);   fin.setHours(0,0,0,0);
+        if (debut <= today && today <= fin) { bestIdx = i; break; }
+      }
+      setSemaineIdx(bestIdx);
+    });
 
     if (isAdmin) {
       // Arborescence filières → niveaux → classes
@@ -503,8 +517,8 @@ export default function EmploiDuTemps() {
   };
 
   const addSemaine = async () => {
-    if (!newSem.date_debut || !newSem.date_fin || !newSem.semestre_id)
-      return showToast("Dates et semestre requis.","error");
+    if (!newSem.date_debut || !newSem.date_fin)
+      return showToast("Les deux dates sont requises.","error");
     if (newSem.date_fin < newSem.date_debut)
       return showToast("La date de fin doit être après la date de début.","error");
     try {
@@ -512,10 +526,59 @@ export default function EmploiDuTemps() {
       setSemaines(p => [r.data, ...p]);
       setSemaineIdx(0);
       setShowAddSem(false);
-      setNewSem({ date_debut:"", date_fin:"", semestre_id:"" });
+      setNewSem({ date_debut:"", date_fin:"" });
       showToast(`Semaine "${semaineLabel(r.data.date_debut)}" créée !`);
     } catch (e) { showToast(e.response?.data?.error || "Erreur","error"); }
   };
+
+
+  // ✅ Temps réel — écouter les événements socket pour l'emploi du temps
+  useEffect(() => {
+    if (!socket) return;
+
+    // Nouvelle séance créée par l'admin
+    const onNewSeance = ({ seances }) => {
+      if (!semaine) return;
+      const relevant = seances.filter(s => String(s.semaine_id) === String(semaine?.id));
+      if (!relevant.length) return;
+      setSeances(prev => {
+        const ids = new Set(prev.map(s => s.id));
+        return [...prev, ...relevant.filter(s => !ids.has(s.id))];
+      });
+    };
+
+    // Séance modifiée ou annulée
+    const onUpdateSeance = ({ seanceId, seance, statut }) => {
+      setSeances(prev => prev.map(s =>
+        s.id === seanceId ? (seance || { ...s, statut: statut || s.statut }) : s
+      ));
+    };
+
+    // Séance supprimée
+    const onDeleteSeance = ({ seanceId }) => {
+      setSeances(prev => prev.filter(s => s.id !== seanceId));
+    };
+
+    // Nouvelle semaine créée
+    const onNewSemaine = (semaine) => {
+      setSemaines(prev => {
+        if (prev.some(s => s.id === semaine.id)) return prev;
+        return [semaine, ...prev];
+      });
+    };
+
+    socket.on("new_seance",    onNewSeance);
+    socket.on("update_seance", onUpdateSeance);
+    socket.on("delete_seance", onDeleteSeance);
+    socket.on("new_semaine",   onNewSemaine);
+
+    return () => {
+      socket.off("new_seance",    onNewSeance);
+      socket.off("update_seance", onUpdateSeance);
+      socket.off("delete_seance", onDeleteSeance);
+      socket.off("new_semaine",   onNewSemaine);
+    };
+  }, [socket, semaine]);
 
   // ── Grille ─────────────────────────────────────────────────────────────────
   const renderGrille = () => (
@@ -566,12 +629,16 @@ export default function EmploiDuTemps() {
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition">
               <Plus className="h-4 w-4"/> Nouvelle semaine
             </button>
-            {semaine && (
-              <button onClick={() => { setEditSeance(null); setShowModal(true); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition">
-                <Plus className="h-4 w-4"/> Programmer un cours
-              </button>
-            )}
+            {semaine && (() => {
+              const today = new Date(); today.setHours(0,0,0,0);
+              const fin   = new Date(semaine.date_fin); fin.setHours(0,0,0,0);
+              return fin >= today ? (
+                <button onClick={() => { setEditSeance(null); setShowModal(true); }}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition">
+                  <Plus className="h-4 w-4"/> Programmer un cours
+                </button>
+              ) : null;
+            })()}
           </div>
         )}
       </div>
@@ -643,10 +710,35 @@ export default function EmploiDuTemps() {
               </button>
             </div>
 
-            {loading
-              ? <div className="flex justify-center py-16"><Loader className="h-6 w-6 animate-spin text-blue-500"/></div>
-              : seances.length === 0
-              ? <div className="flex flex-col items-center py-12 text-center">
+            {(() => {
+              // ✅ Semaine expirée si date_fin < aujourd'hui (00:00:00)
+              const today = new Date(); today.setHours(0,0,0,0);
+              const fin   = semaine?.date_fin ? new Date(semaine.date_fin) : null;
+              if (fin) fin.setHours(0,0,0,0);
+              const isExpired = fin && fin < today;
+
+              if (isExpired) return (
+                <div className="flex flex-col items-center py-12 text-center">
+                  <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <Calendar className="h-6 w-6 text-gray-400"/>
+                  </div>
+                  <p className="text-gray-600 font-medium">Semaine terminée</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Cette semaine s'est terminée le{" "}
+                    {new Date(semaine.date_fin).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}.
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">Naviguez vers une semaine en cours ou à venir.</p>
+                </div>
+              );
+
+              if (loading) return (
+                <div className="flex justify-center py-16">
+                  <Loader className="h-6 w-6 animate-spin text-blue-500"/>
+                </div>
+              );
+
+              if (seances.length === 0) return (
+                <div className="flex flex-col items-center py-12 text-center">
                   <Calendar className="h-10 w-10 text-gray-200 mb-2"/>
                   <p className="text-gray-400 text-sm">Aucun cours cette semaine</p>
                   {isAdmin && (
@@ -656,8 +748,10 @@ export default function EmploiDuTemps() {
                     </button>
                   )}
                 </div>
-              : renderGrille()
-            }
+              );
+
+              return renderGrille();
+            })()}
 
             {/* Légende */}
             {seances.length > 0 && (
@@ -700,18 +794,6 @@ export default function EmploiDuTemps() {
                   className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
               </div>
               {/* Prévisualisation du nom */}
-              {/* Semestre */}
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Semestre *</label>
-                <select value={newSem.semestre_id}
-                  onChange={e => setNewSem(f => ({...f, semestre_id: e.target.value}))}
-                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-                  <option value="">Choisir un semestre...</option>
-                  {semestresRef.map(s => (
-                    <option key={s.id} value={s.id}>{s.libelle}</option>
-                  ))}
-                </select>
-              </div>
               {/* Prévisualisation */}
               {newSem.date_debut && (
                 <div className="bg-blue-50 rounded-xl px-3 py-2.5">

@@ -83,6 +83,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth',          require('./routes/auth'));
+app.use('/api/dashboard',       require('./routes/dashboard'));
 app.use('/api/users',         require('./routes/users'));
 app.use('/api/profil',        require('./routes/profil'));
 app.use('/api/annees',        require('./routes/annees'));
@@ -93,6 +94,7 @@ app.use('/api/publications',  require('./routes/publications'));
 app.use('/api/messaging',     require('./routes/messaging'));
 app.use('/api/matieres',      require('./routes/matieres'));
 app.use('/api/cours', require('./routes/cours'));
+app.use('/api/mes-cours', require('./routes/mes-cours')); 
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -24,6 +24,7 @@ import Matiere             from "../dashbord/Matieres";
 import DashboardEtudiant   from "../dashbord/DashboardEtudiant";
 import DashboardEnseignant from "../dashbord/DashboardEnseignant";
 import DashboardAdmin      from "../dashbord/DashboardAdmin";
+import MesCours from "../dashbord/MesCours";
 
 // ─── Clé sessionStorage ───────────────────────────────────────────────────────
 // On utilise sessionStorage (pas localStorage) pour que la page active
@@ -53,6 +54,7 @@ const pageLabels = {
   publications:       "Publications",
   "annee-academique": "Année académique",
   profil:             "Mon profil",
+
 };
 
 // Pages valides par rôle — pour valider la page restaurée depuis sessionStorage
@@ -72,7 +74,7 @@ function renderPage(role, activePage, onNavigateToProfile, onNavigate) {
       case "publications":    return feed;
       case "emploi-du-temps": return <EmploiDuTemps/>;
       case "notes":           return <Notes/>;
-      case "cours":           return <Placeholder label="Mes cours — à venir"/>;
+      case "cours":           return <MesCours/>;
       case "messagerie":      return <Messaging/>;
       case "notifications":   return <Notification/>;
       case "annonces":        return <Announcement/>;
@@ -85,7 +87,7 @@ function renderPage(role, activePage, onNavigateToProfile, onNavigate) {
     switch (activePage) {
       case "dashboard":       return <DashboardEnseignant onNavigate={onNavigate}/>;
       case "profil":          return <Profil/>;
-      case "cours":           return <Placeholder label="Mes cours — à venir"/>;
+      case "cours":           return <MesCours/>;
       case "notes":           return <Notes/>;
       case "emploi-du-temps": return <EmploiDuTemps/>;
       case "messagerie":      return <Messaging/>;
@@ -102,7 +104,7 @@ function renderPage(role, activePage, onNavigateToProfile, onNavigate) {
       case "publications":     return feed;
       case "utilisateurs":     return <Users/>;
       case "filieres":         return <Filieres/>;
-      case "cours":            return <Placeholder label="Cours — à venir"/>;
+      case "cours":            return <MesCours/>;
       case "emploi-du-temps":  return <EmploiDuTemps/>;
       case "notes":            return <Notes/>;
       case "statistiques":     return <Placeholder label="Statistiques — à venir"/>;
